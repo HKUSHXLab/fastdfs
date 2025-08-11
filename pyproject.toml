@@ -54,6 +54,7 @@ dependencies = [
     
     # Utilities
     "psutil",
+    "loguru",
 ]
 
 [project.optional-dependencies]
