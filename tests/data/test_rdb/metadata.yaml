@@ -1,0 +1,64 @@
+column_groups: null
+dataset_name: sbm_user_item
+tables:
+- columns:
+  - capacity: 100
+    dtype: primary_key
+    name: user_id
+  - dtype: float
+    in_size: 1
+    name: user_feature_0
+  format: numpy
+  name: user
+  source: data/user.npz
+  time_column: null
+- columns:
+  - capacity: 100
+    dtype: primary_key
+    name: item_id
+  - dtype: float
+    in_size: 1
+    name: item_feature_0
+  format: numpy
+  name: item
+  source: data/item.npz
+  time_column: null
+- columns:
+  - capacity: 100
+    dtype: foreign_key
+    link_to: user.user_id
+    name: user_id
+  - capacity: 100
+    dtype: foreign_key
+    link_to: item.item_id
+    name: item_id
+  - dtype: datetime
+    name: timestamp
+  format: numpy
+  name: interaction
+  source: data/interaction.npz
+  time_column: timestamp
+tasks:
+- columns:
+  - capacity: 100
+    dtype: foreign_key
+    link_to: user.user_id
+    name: user_id
+  - capacity: 100
+    dtype: foreign_key
+    link_to: item.item_id
+    name: item_id
+  - dtype: datetime
+    name: timestamp
+  - dtype: category
+    name: label
+  evaluation_metric: auroc
+  format: numpy
+  key_prediction_label_column: label
+  key_prediction_query_idx_column: query_idx
+  name: linkpred
+  source: linkpred/{split}.npz
+  target_column: label
+  target_table: interaction
+  task_type: classification
+  time_column: timestamp
