@@ -1,0 +1,4 @@
+dfs:
+  max_depth : 3
+  use_cutoff_time : True
+  engine: dfs2sql

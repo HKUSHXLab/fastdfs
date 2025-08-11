@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastdfs"
+version = "0.1.0"
+description = "Fast Deep Feature Synthesis for tabular data - extracted from tab2graph"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "AWS Shanghai AI Lab"}
+]
+maintainers = [
+    {name = "AWS Shanghai AI Lab"}
+]
+keywords = ["feature engineering", "deep feature synthesis", "tabular data", "automated ML"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+
+# Core dependencies (minimal set focused on DFS)
+dependencies = [
+    # Data processing
+    "pandas",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    
+    # DFS engines
+    "featuretools",
+    "duckdb",
+    "sqlalchemy",
+    "sqlglot",
+    "sql_formatter",
+    
+    # Configuration and CLI
+    "pydantic==1.10.12",
+    "pyyaml",
+    "typer",
+    "tqdm",
+    
+    # Utilities
+    "psutil",
+]
+
+[project.optional-dependencies]
+# Development dependencies
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "flake8>=5.0.0",
+    "mypy>=0.991",
+]
+
+# Testing with additional data formats
+testing = [
+    "pytest",
+    "pytest-cov",
+]
+
+[project.scripts]
+fastdfs = "fastdfs.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/dglai/tab2graph"
+Repository = "https://github.com/dglai/tab2graph"
+Documentation = "https://github.com/dglai/tab2graph/blob/main/fastdfs/README.md"
+"Bug Tracker" = "https://github.com/dglai/tab2graph/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fastdfs*"]
+
+[tool.setuptools.package-data]
+fastdfs = ["configs/**/*.yaml"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
