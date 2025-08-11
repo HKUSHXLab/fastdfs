@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, Optional, List
 from pathlib import Path
 import pydantic
-import logging
+from loguru import logger
 import numpy as np
 
 from ..dataset import (
@@ -23,9 +23,6 @@ from .transform import (
     make_task_table_name,
     unmake_task_table_name,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class _NameAndConfig(pydantic.BaseModel):
     name : str

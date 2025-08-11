@@ -23,19 +23,21 @@ Examples:
 """
 
 import argparse
-import logging
+from loguru import logger
 import subprocess
 import sys
 from pathlib import Path
 import tempfile
 import shutil
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Add the project root to the path  
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from fastdfs.utils.logging_config import configure_logging
+
+# Configure logging for the example
+configure_logging(level="INFO")
 
 
 def run_command(command: str, description: str, execute: bool = False):

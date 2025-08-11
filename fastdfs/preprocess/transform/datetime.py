@@ -3,7 +3,7 @@ import copy
 from typing import Tuple, Dict, Optional, List
 import pydantic
 import numpy as np
-import logging
+from loguru import logger
 import datetime
 from ...dataset import DBBColumnDType
 
@@ -15,9 +15,6 @@ from .base import (
     RDBData,
 )
 from ...utils import datetime_utils
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class DatetimeFeaturizeMethod(str, Enum):
     YEAR = 'YEAR'

@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, Optional, List
 import pydantic
 import numpy as np
-import logging
+from loguru import logger
 from ...dataset import DBBColumnDType
 
 from ...utils.device import DeviceInfo
@@ -14,9 +14,6 @@ from .base import (
 from tqdm import tqdm
 import torch
 import torch.multiprocessing as mp
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 import gensim.downloader as api
 from gensim.utils import tokenize

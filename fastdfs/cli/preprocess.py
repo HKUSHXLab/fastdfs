@@ -1,6 +1,6 @@
 from pathlib import Path
 import typer
-import logging
+from loguru import logger
 # Remove wandb dependency for fastdfs
 # import wandb
 import os
@@ -14,9 +14,6 @@ from ..preprocess import (
     get_rdb_preprocess_choice,
 )
 from ..utils import yaml_utils
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 RDBPreprocessChoice = get_rdb_preprocess_choice()
 

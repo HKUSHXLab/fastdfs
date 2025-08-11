@@ -21,11 +21,7 @@ from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pandas as pd
-import logging
-
-
-logger = logging.getLogger(__name__)
-logger.setLevel("DEBUG")
+from loguru import logger
 
 
 class JoinDirection(Enum):

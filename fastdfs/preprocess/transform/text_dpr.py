@@ -2,7 +2,7 @@ import copy
 from typing import Tuple, Dict, Optional, List
 import pydantic
 import numpy as np
-import logging
+from loguru import logger
 from ...dataset import DBBColumnDType
 
 from ...utils.device import DeviceInfo
@@ -16,9 +16,6 @@ from tqdm import tqdm
 import torch
 from transformers import DPRContextEncoder, DPRContextEncoderTokenizer
 import torch.multiprocessing as mp
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 def _run_one_device(
     proc_id : int,

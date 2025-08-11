@@ -3,7 +3,7 @@ from typing import Tuple, Dict, Optional, List
 import pydantic
 import numpy as np
 import pandas as pd
-import logging
+from loguru import logger
 from ...dataset import DBBColumnDType
 
 from ...utils.device import DeviceInfo
@@ -13,9 +13,6 @@ from .base import (
     ColumnData,
     RDBData,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class RemapCategoryTransformConfig(pydantic.BaseModel):
     pass

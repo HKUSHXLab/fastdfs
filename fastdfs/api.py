@@ -4,7 +4,7 @@ Enhanced API for FastDFS - Simplified interface for common DFS workflows
 
 from pathlib import Path
 from typing import Optional, Union
-import logging
+from loguru import logger
 
 from .dataset import load_rdb_data, DBBRDBDataset
 from .preprocess.dfs import DFSPreprocess, DFSPreprocessConfig
@@ -12,8 +12,6 @@ from .preprocess.transform_preprocess import RDBTransformPreprocess, RDBTransfor
 from .preprocess.dfs.core import DFSConfig
 from .utils.device import get_device_info
 from .utils import yaml_utils
-
-logger = logging.getLogger(__name__)
 
 def run_dfs(
     dataset_path: Union[str, Path],

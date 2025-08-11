@@ -2,7 +2,7 @@ from typing import Tuple, Dict, Optional, List
 import numpy as np
 import pandas as pd
 import pydantic
-import logging
+from loguru import logger
 from collections import defaultdict
 from ...dataset import DBBColumnDType
 
@@ -16,9 +16,6 @@ from .base import (
     is_task_table,
     unmake_task_table_name,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class KeyMappingConfig(pydantic.BaseModel):
     pass

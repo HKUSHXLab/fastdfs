@@ -2,7 +2,7 @@ from typing import Tuple, Dict, Optional, List
 from collections import defaultdict
 import numpy as np
 import pydantic
-import logging
+from loguru import logger
 from ...dataset import DBBColumnDType
 
 from ...utils.device import DeviceInfo
@@ -14,9 +14,6 @@ from .base import (
     is_task_table,
     unmake_task_table_name,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class RDBTransformWrapper(RDBTransform):
 

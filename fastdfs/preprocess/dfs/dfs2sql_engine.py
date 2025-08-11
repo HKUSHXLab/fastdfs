@@ -11,11 +11,7 @@ import pprint
 from .core import DFSEngine, DFSConfig, dfs_engine
 from .gen_sqls import features2sql, decode_column_from_sql
 from .database import DuckDBBuilder
-import logging
-
-
-logger = logging.getLogger(__name__)
-logger.setLevel("DEBUG")
+from loguru import logger
 
 
 @dfs_engine

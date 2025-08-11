@@ -20,7 +20,7 @@ Examples:
 """
 
 import argparse
-import logging
+from loguru import logger
 import sys
 from pathlib import Path
 import tempfile
@@ -31,13 +31,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import fastdfs
+from fastdfs.utils.logging_config import configure_logging
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Configure logging for the example
+configure_logging(level="INFO")
 
 
 def main():

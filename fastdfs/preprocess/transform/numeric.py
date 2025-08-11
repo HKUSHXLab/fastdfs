@@ -7,7 +7,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, QuantileTransformer
-import logging
+from loguru import logger
 from ...dataset import DBBColumnDType
 
 from ...utils.device import DeviceInfo
@@ -17,9 +17,6 @@ from .base import (
     ColumnData,
     RDBData,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class NormNumericTransformConfig(pydantic.BaseModel):
     impute_strategy : Optional[str] = "median"

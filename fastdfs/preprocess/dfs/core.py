@@ -1,7 +1,7 @@
 import abc
 from typing import Tuple, Dict, Optional, List, Union
 import pandas as pd
-import logging
+from loguru import logger
 import numpy as np
 import tqdm
 import pydantic
@@ -26,9 +26,6 @@ from .primitives import (
     ArrayMin,
     ArrayMean,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel("DEBUG")
 
 _DFS_ENGINE_REGISTRY = {}
 

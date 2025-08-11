@@ -2,12 +2,9 @@ from typing import Optional, List
 import pandas as pd
 import featuretools as ft
 import tqdm
-import logging
+from loguru import logger
 
 from .core import DFSEngine, DFSConfig, dfs_engine, EntitySetBuilder
-
-logger = logging.getLogger(__name__)
-logger.setLevel("DEBUG")
 
 @dfs_engine
 class FeaturetoolsEngine(DFSEngine):

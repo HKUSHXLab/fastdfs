@@ -2,7 +2,7 @@ from typing import Tuple, Dict, Optional, List
 import numpy as np
 import pandas as pd
 import pydantic
-import logging
+from loguru import logger
 from collections import defaultdict
 from ...dataset import DBBColumnDType
 
@@ -15,9 +15,6 @@ from .base import (
     RDBData,
     is_task_table,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class FilterColumnConfig(pydantic.BaseModel):
     drop_dtypes: Optional[List[str]] = None

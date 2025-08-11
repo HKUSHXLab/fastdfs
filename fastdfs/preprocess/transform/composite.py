@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, Optional, List
 import numpy as np
 import pydantic
-import logging
+from loguru import logger
 
 from ...utils.device import DeviceInfo
 from .base import (
@@ -12,9 +12,6 @@ from .base import (
     RDBData,
 )
 from .wrapper import RDBTransformWrapper
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class _NameAndConfig(pydantic.BaseModel):
     name : str

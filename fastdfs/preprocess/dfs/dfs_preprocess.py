@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, Optional, List
 from pathlib import Path
 import pydantic
-import logging
+from loguru import logger
 import numpy as np
 import pandas as pd
 import featuretools as ft
@@ -20,9 +20,6 @@ from ...dataset import (
 from ...utils.device import DeviceInfo
 from ..base import RDBDatasetPreprocess, rdb_preprocess
 from . import core
-
-logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
 
 class DFSPreprocessConfig(pydantic.BaseModel):
     dfs : core.DFSConfig
