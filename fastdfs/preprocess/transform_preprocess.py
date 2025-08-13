@@ -33,6 +33,25 @@ class RDBTransformPreprocessConfig(pydantic.BaseModel):
 
 @rdb_preprocess
 class RDBTransformPreprocess(RDBDatasetPreprocess):
+    """
+    RDB dataset preprocessor that applies a configurable chain of data transformations.
+    
+    This preprocessor converts on-disk RDB datasets into in-memory RDBData objects,
+    applies a sequence of transformations, and outputs a new transformed dataset.
+    It handles both shared table data and task-specific data, ensuring proper
+    separation during the fit/transform process.
+    
+    The preprocessor supports:
+    - Configurable transformation pipelines via YAML
+    - Proper handling of train/validation/test splits
+    - Shared schema management between tasks and data tables
+    - Metadata and relationship preservation
+    
+    Attributes:
+        config_class: RDBTransformPreprocessConfig for validation
+        name: "transform" - identifier for this preprocessor
+        default_config: Default transformation pipeline configuration
+    """
 
     config_class = RDBTransformPreprocessConfig
     name : str = "transform"
@@ -112,6 +131,19 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
         ctor.done(output_path)
 
     def extract_data(self, dataset : DBBRDBDataset) -> RDBData:
+        """
+        Extract data tables from the dataset into in-memory RDBData format.
+        
+        This method converts the on-disk table data into the in-memory RDBData
+        representation, preserving metadata and relationships. It handles
+        time column annotations and column group structures.
+        
+        Args:
+            dataset: Input RDB dataset to extract data from
+            
+        Returns:
+            RDBData object containing all table data with metadata
+        """
         tables = {tbl_name : {} for tbl_name in dataset.tables}
         for tbl_schema in dataset.metadata.tables:
             tbl_name = tbl_schema.name
@@ -139,32 +171,38 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
         self,
         dataset : DBBRDBDataset,
     ) -> Tuple[RDBData, Dict[str, RDBData]]:
+        """
+        Extract task-specific data and separate it into fit and transform sets.
+        
+        This method processes task data and determines which columns need to be
+        fitted (task-specific data) vs. which can use existing transforms (shared
+        schema data). It properly handles the concatenation of train/val/test splits.
+        
+        Args:
+            dataset: Input RDB dataset containing task data
+            
+        Returns:
+            Tuple of:
+            - RDBData for fitting (task-specific columns)
+            - Dict mapping task names to RDBData for transform-only (shared columns)
+        """
         fit_table = {}
         transform_tables = {
             task.metadata.name : {}
             for task in dataset.tasks
         }
+        
+        # Build a mapping from table name to table schema for quick lookup
+        table_schema_map = {tbl_schema.name: tbl_schema for tbl_schema in dataset.metadata.tables}
+        
         for task_id, task in enumerate(dataset.tasks):
             task_name = task.metadata.name
-            target_table_name = task.metadata.target_table
-            task_table_name = make_task_table_name(task_name, target_table_name)
-            for tbl_schema in dataset.metadata.tables:
-                if tbl_schema.name == target_table_name:
-                    target_tbl_schema = tbl_schema
-                    break
+            task_table_name = make_task_table_name(task_name)
 
             fit_table[task_table_name] = {}
             transform_tables[task_name][task_table_name] = {}
             for col_schema in task.metadata.columns:
                 col = col_schema.name
-                if (task.metadata.task_type == DBBTaskType.retrieval
-                    and col in [
-                        task.metadata.key_prediction_label_column,
-                        task.metadata.key_prediction_query_idx_column,
-                    ]):
-                    # Skip extra val/test columns needed by retrieval task
-                    # because they have been correctly processed.
-                    continue
                 col_data = np.concatenate([
                     task.train_set[col],
                     task.validation_set[col],
@@ -173,9 +211,10 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
                 col_meta = dict(col_schema)
                 if col == task.metadata.time_column:
                     col_meta['is_time_column'] = True
-                if col in target_tbl_schema.columns:
-                    # Columns also in the target table are drawn from the same
-                    # data distribution, thus only requiring transform.
+                
+                # Check if column has shared schema with a data table column
+                if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
+                    # Column shares schema with existing data table column - needs only transform
                     transform_tables[task_name][task_table_name][col] = \
                         ColumnData(col_meta, col_data)
                 else:
@@ -215,8 +254,7 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
     ):
         for orig_task in ds.tasks:
             task_name = orig_task.metadata.name
-            tgt_table_name = orig_task.metadata.target_table
-            task_table_name = make_task_table_name(task_name, tgt_table_name)
+            task_table_name = make_task_table_name(task_name)
             all_data = {
                 **task_data_fit[task_name].tables[task_table_name],
                 **task_data_transform[task_name].tables[task_table_name]
@@ -244,19 +282,6 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
                 label_col = all_data[orig_task.metadata.target_column].data
                 num_classes = len(np.unique(label_col))
                 task_ctor.add_task_field('num_classes', num_classes)
-            elif orig_task.metadata.task_type == DBBTaskType.retrieval:
-                # Copy extra columns needed by retrieval task.
-                for col_name in [
-                    orig_task.metadata.key_prediction_label_column,
-                    orig_task.metadata.key_prediction_query_idx_column,
-                ]:
-                    task_ctor.add_task_data(
-                        col_name,
-                        None,
-                        orig_task.validation_set[col_name],
-                        orig_task.test_set[col_name],
-                        dtype=None
-                    )
             ctor.add_task(task_ctor)
 
 
@@ -272,7 +297,7 @@ def _split_rdb_and_task(all_data_fit : RDBData) -> Tuple[RDBData, Dict[str, RDBD
     task_data = {}
     for table_name, table in all_data_fit.tables.items():
         if is_task_table(table_name):
-            task_name, _ = unmake_task_table_name(table_name)
+            task_name = unmake_task_table_name(table_name)
             task_data[task_name] = RDBData({table_name : table})
         else:
             rdb_data.tables[table_name] = table

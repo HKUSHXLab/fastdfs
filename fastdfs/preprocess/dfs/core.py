@@ -47,12 +47,41 @@ def base_feature_is_target(feature, target):
         raise NotImplementedError(f'Unsupported subfeature {feature}')
 
 def dfs_engine(preprocess_class):
+    """
+    Decorator to register a DFS engine class.
+    
+    This decorator adds the engine class to the global registry, making it
+    available for lookup by name through get_dfs_engine().
+    
+    Args:
+        preprocess_class: Class that inherits from DFSEngine
+        
+    Returns:
+        The same class, now registered in the global registry
+        
+    Example:
+        @dfs_engine
+        class MyDFSEngine(DFSEngine):
+            name = "my_engine"
+    """
     global _DFS_ENGINE_REGISTRY
     _DFS_ENGINE_REGISTRY[preprocess_class.name] = preprocess_class
     return preprocess_class
 
 
 def get_dfs_engine(name: str):
+    """
+    Retrieve a registered DFS engine class by name.
+    
+    Args:
+        name: Name of the engine class to retrieve
+        
+    Returns:
+        The DFS engine class
+        
+    Raises:
+        ValueError: If no engine with the given name is registered
+    """
     global _DFS_ENGINE_REGISTRY
     preprocess_class = _DFS_ENGINE_REGISTRY.get(name, None)
     if preprocess_class is None:
@@ -61,12 +90,31 @@ def get_dfs_engine(name: str):
 
 
 def get_dfs_engine_choice():
+    """
+    Get an Enum containing all registered DFS engine names.
+    
+    Returns:
+        Enum with all available DFS engine names as choices
+    """
     global _DFS_ENGINE_REGISTRY
     names = _DFS_ENGINE_REGISTRY.keys()
     return Enum("DFSEngineChoice", {name.upper(): name for name in names})
 
 
 class DFSConfig(pydantic.BaseModel):
+    """
+    Configuration model for Deep Feature Synthesis parameters.
+    
+    This class defines all the configurable parameters for the DFS process,
+    including aggregation primitives, depth limits, and engine selection.
+    
+    Attributes:
+        agg_primitives: List of aggregation primitive names to use
+        max_depth: Maximum depth for feature generation  
+        use_cutoff_time: Whether to use temporal cutoff times
+        engine: Name of the DFS engine to use for computation
+        engine_path: Optional path for engine-specific configuration
+    """
     agg_primitives: List[str] = [
         "max",
         "min",
@@ -85,8 +133,25 @@ class DFSConfig(pydantic.BaseModel):
     engine_path : Optional[str] = "/tmp/duck.db"
 
 class EntitySetBuilder:
+    """
+    Builder class for constructing featuretools EntitySets from RDB data.
+    
+    This class provides a fluent interface for building EntitySets by adding
+    dataframes, relationships, and other configuration needed for DFS.
+    
+    Attributes:
+        entity_set: The featuretools EntitySet being constructed
+        cutoff_time: Optional cutoff time for temporal features
+        relationships: List of relationships between entities
+    """
 
     def __init__(self, entity_set : ft.EntitySet):
+        """
+        Initialize the builder with an EntitySet.
+        
+        Args:
+            entity_set: Empty featuretools EntitySet to populate
+        """
         self.entity_set = entity_set
         self.cutoff_time = None
         self.relationships = []
@@ -134,10 +199,34 @@ class EntitySetBuilder:
 
 
 class DFSEngine:
+    """
+    Abstract base class for Deep Feature Synthesis computation engines.
+    
+    DFS engines are responsible for executing the feature computation process
+    after feature specifications have been generated. Different engines can
+    implement different strategies for computing features (e.g., in-memory,
+    SQL-based, distributed, etc.).
+    
+    The engine workflow involves:
+    1. prepare(): Generate feature specifications using featuretools
+    2. compute(): Execute the actual feature computation
+    3. Integration of results with original data
+    
+    Attributes:
+        config_class: Configuration class for this engine type
+    """
 
     config_class = DFSConfig
 
     def __init__(self, config: DFSConfig, dataset: DBBRDBDataset, task_id: int):
+        """
+        Initialize the DFS engine.
+        
+        Args:
+            config: DFS configuration parameters
+            dataset: Input RDB dataset
+            task_id: Index of the task to process features for
+        """
         self.config = config
         self.dataset = dataset
         self.task_id = task_id
@@ -157,6 +246,20 @@ class DFSEngine:
                 self.agg_primitives.append(prim)
 
     def run(self) -> Tuple[pd.DataFrame, Dict[str, ft.FeatureBase]]:
+        """
+        Execute the complete DFS pipeline for feature generation.
+        
+        This method coordinates the feature preparation and computation phases,
+        returning both the computed feature values and the feature specifications.
+        
+        Returns:
+            Tuple of:
+            - DataFrame containing computed feature values  
+            - Dictionary mapping feature names to feature objects
+            
+        Raises:
+            RuntimeError: If no features are generated (e.g., max_depth too low)
+        """
         features = self.prepare()
         if len(features) == 0:
             raise RuntimeError("No feature to compute, try to increase the depth.")
@@ -169,6 +272,15 @@ class DFSEngine:
         return feature_df, feature_map
 
     def prepare(self):
+        """
+        Prepare feature specifications using featuretools DFS.
+        
+        This method builds the EntitySet, runs featuretools DFS to generate
+        feature specifications, and filters the results based on configuration.
+        
+        Returns:
+            List of featuretools FeatureBase objects representing features to compute
+        """
         entity_set = ft.EntitySet(
             self.dataset.metadata.dataset_name
             + "-"
@@ -234,10 +346,22 @@ class DFSEngine:
                 continue
             if not use_cutoff_time:
                 # Filter out features based on prediction target when cutoff time
-                # is disabled.
-                target = (task.metadata.target_table, task.metadata.target_column)
-                if base_feature_is_target(feat, target):
-                    continue
+                # is disabled. We need to find the target table from shared_schema.
+                task = self.dataset.tasks[self.task_id]
+                target_col_name = task.metadata.target_column
+                
+                # Find which table the target column is in by looking at shared_schema
+                target_table_name = None
+                for col_schema in task.metadata.columns:
+                    if (col_schema.name == target_col_name and 
+                        hasattr(col_schema, 'shared_schema') and col_schema.shared_schema):
+                        target_table_name, _ = col_schema.shared_schema.split('.')
+                        break
+                
+                if target_table_name:
+                    target = (target_table_name, target_col_name)
+                    if base_feature_is_target(feat, target):
+                        continue
             new_features.append(feat)
         return new_features
 
@@ -247,7 +371,21 @@ class DFSEngine:
         full_data : bool = True
     ):
         task = self.dataset.tasks[self.task_id]
-        target_table = task.metadata.target_table
+        
+        # Build a mapping to find the main data table that task columns reference
+        main_data_table = None
+        for col_schema in task.metadata.columns:
+            if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
+                table_name, _ = col_schema.shared_schema.split('.')
+                if main_data_table is None:
+                    main_data_table = table_name
+                elif main_data_table != table_name:
+                    # Multiple tables referenced - this is more complex
+                    main_data_table = None
+                    break
+        
+        # Check for duplicate values in primary key columns
+        target_table = main_data_table
         for col_schema in task.metadata.columns:
             col_name = col_schema.name
             col_data = task.train_set[col_name]
@@ -363,16 +501,37 @@ class DFSEngine:
                     # is actually a foreign key and that task table conceptually
                     # refers to a non-existing target table. This requires more
                     # comprehensive fix in the future. Here, we force it to be foreign key,
-                    # and **GUESS** its foreign key to be the primary key of the
-                    # current target table.
+                    # and **GUESS** its foreign key to be the primary key from shared_schema.
                     log_ty = "Categorical"
                     tag = "foreign_key"
-                    pk = (task.metadata.target_table, col_name)
+                    # Try to get the primary key from shared_schema
+                    shared_schema = getattr(col_schema, 'shared_schema', None)
+                    if shared_schema:
+                        pk_table, pk_col = shared_schema.split('.')
+                        pk = (pk_table, pk_col)
+                    else:
+                        # Fallback to old behavior - this should not happen with new design
+                        pk = (main_data_table or "unknown", col_name)
                     fk_to_pk[(task_df_name, col_name)] = pk
 
                 elif col_dtype == DBBColumnDType.foreign_key:
-                    pk = fk_to_pk[(target_table, col_name)]
-                    fk_to_pk[(task_df_name, col_name)] = pk
+                    # Get the primary key reference from shared_schema
+                    shared_schema = getattr(col_schema, 'shared_schema', None)
+                    if shared_schema:
+                        fk_table, fk_col = shared_schema.split('.')
+                        # Find the primary key that this foreign key refers to
+                        pk = None
+                        for rel in self.dataset.metadata.relationships:
+                            if rel.fk.table == fk_table and rel.fk.column == fk_col:
+                                pk = (rel.pk.table, rel.pk.column)
+                                break
+                        if pk:
+                            fk_to_pk[(task_df_name, col_name)] = pk
+                    else:
+                        # Fallback for old-style foreign keys without shared_schema
+                        if target_table and (target_table, col_name) in fk_to_pk:
+                            pk = fk_to_pk[(target_table, col_name)]
+                            fk_to_pk[(task_df_name, col_name)] = pk
 
                 task_df[col_name] = series
                 logical_types[col_name] = log_ty

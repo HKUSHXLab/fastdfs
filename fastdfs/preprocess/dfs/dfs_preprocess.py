@@ -26,6 +26,24 @@ class DFSPreprocessConfig(pydantic.BaseModel):
 
 @rdb_preprocess
 class DFSPreprocess(RDBDatasetPreprocess):
+    """
+    RDB dataset preprocessor for automated feature engineering using Deep Feature Synthesis.
+    
+    This preprocessor uses featuretools and custom DFS engines to automatically generate
+    new features from relational data. It supports multiple engines for feature computation
+    and handles the integration of generated features with original data.
+    
+    The DFS process involves:
+    1. Building entity sets from RDB data
+    2. Generating feature specifications using featuretools
+    3. Computing features through pluggable engines
+    4. Creating output datasets with augmented feature sets
+    
+    Attributes:
+        config_class: DFSPreprocessConfig for configuration validation
+        name: "dfs" - identifier for this preprocessor  
+        default_config: Default DFS configuration with basic settings
+    """
 
     config_class = DFSPreprocessConfig
     name : str = "dfs"
@@ -33,6 +51,12 @@ class DFSPreprocess(RDBDatasetPreprocess):
         dfs=core.DFSConfig())
 
     def __init__(self, config : DFSPreprocessConfig):
+        """
+        Initialize the DFS preprocessor with configuration.
+        
+        Args:
+            config: DFS configuration specifying engine, depth, primitives, etc.
+        """
         super().__init__(config)
 
     def run(
@@ -41,6 +65,17 @@ class DFSPreprocess(RDBDatasetPreprocess):
         output_path : Path,
         device : DeviceInfo
     ):
+        """
+        Execute DFS feature generation for all tasks in the dataset.
+        
+        This method runs the DFS pipeline for each task, generating new features
+        and creating an output dataset with the enhanced feature set.
+        
+        Args:
+            dataset: Input RDB dataset to process
+            output_path: Directory path for the output dataset
+            device: Device information for computation optimization
+        """
         new_task_df = {}
         new_features = {}
         for task_id, task in enumerate(dataset.tasks):

@@ -44,21 +44,21 @@ tasks:
     dtype: foreign_key
     link_to: user.user_id
     name: user_id
+    shared_schema: user.user_id
   - capacity: 100
     dtype: foreign_key
     link_to: item.item_id
     name: item_id
+    shared_schema: item.item_id
   - dtype: datetime
     name: timestamp
+    shared_schema: interaction.timestamp
   - dtype: category
     name: label
   evaluation_metric: auroc
   format: numpy
-  key_prediction_label_column: label
-  key_prediction_query_idx_column: query_idx
   name: linkpred
   source: linkpred/{split}.npz
   target_column: label
-  target_table: interaction
   task_type: classification
   time_column: timestamp

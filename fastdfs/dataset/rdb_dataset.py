@@ -200,20 +200,11 @@ class DBBRDBTaskCreator:
     def set_evaluation_metric(self, metric : DBBTaskEvalMetric):
         return self.add_task_field("evaluation_metric", metric)
 
-    def set_target_table(self, tbl : str):
-        return self.add_task_field("target_table", tbl)
-
     def set_target_column(self, col : str):
         return self.add_task_field("target_column", col)
 
     def set_target_time_column(self, col : str):
         return self.add_task_field("time_column", col)
-
-    def set_key_prediction_label_column(self, col : str):
-        return self.add_task_field("key_prediction_label_column", col)
-
-    def set_key_prediction_query_idx_column(self, col : str):
-        return self.add_task_field("key_prediction_query_idx_column", col)
 
     def add_task_field(self, key : str, val : Any):
         self.task_fields[key] = val

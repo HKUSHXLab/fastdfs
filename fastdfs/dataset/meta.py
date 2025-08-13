@@ -56,6 +56,9 @@ class DBBColumnSchema(pydantic.BaseModel):
     name : str
     # Column data type.
     dtype : DBBColumnDType
+    # Optional reference to a data table column this task column shares schema with.
+    # Format: "table_name.column_name"
+    shared_schema : Optional[str] = None
 
 class DBBTableDataFormat(str, Enum):
     PARQUET = 'parquet'
@@ -87,10 +90,7 @@ class DBBTaskType(str, Enum):
 
 TASK_EXTRA_FIELDS = {
     DBBTaskType.classification : ['num_classes'],
-    DBBTaskType.retrieval : [
-        'key_prediction_label_column',
-        'key_prediction_query_idx_column',
-    ],
+    DBBTaskType.retrieval : [],
     DBBTaskType.regression : [],
 }
 
@@ -125,10 +125,7 @@ class DBBTaskMeta(pydantic.BaseModel):
 
     evaluation_metric : DBBTaskEvalMetric
     target_column : str
-    target_table : str
     task_type : Optional[DBBTaskType]
-    key_prediction_label_column: Optional[str] = "label"
-    key_prediction_query_idx_column: Optional[str] = "query_idx"
 
     @property
     def column_dict(self) -> Dict[str, DBBColumnSchema]:
