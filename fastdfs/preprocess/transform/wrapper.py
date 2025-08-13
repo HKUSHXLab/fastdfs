@@ -11,6 +11,7 @@ from .base import (
     RDBData,
 )
 from ...dataset import DBBColumnDType
+from itertools import product
 
 class RDBTransformWrapper(RDBTransform):
 
@@ -112,14 +113,21 @@ class RDBTransformWrapper(RDBTransform):
                     new_tables[tbl_name][col_name] = col
                     col_name_mapping[(tbl_name, col_name)].append((tbl_name, col_name))
         col_name_mapping = dict(col_name_mapping)
-        # Re-create column groups.
+        # Re-create column groups to reflect transformed columns.
         column_groups = None
         if rdb_data.column_groups is not None:
             column_groups = []
             for cg in rdb_data.column_groups:
-                mapped_cg = [col_name_mapping[name_pair] for name_pair in cg]
-                for i in range(len(mapped_cg[0])):
-                    column_groups.append([mapped_cg[j][i] for j in range(len(mapped_cg))])
+                # For each column in the group, get its mapped output columns (or itself if unchanged)
+                mapped_lists = [
+                    col_name_mapping.get(name_pair, [name_pair])
+                    for name_pair in cg
+                ]
+                # Flatten all mapped columns into a single group
+                new_group = []
+                for mapped in mapped_lists:
+                    new_group.extend(mapped)
+                column_groups.append(new_group)
         return RDBData(new_tables, column_groups, rdb_data.relationships)
 
 def _get_cg_meta(cg, rdb_data):

@@ -3,6 +3,7 @@ from pathlib import Path
 import pydantic
 from loguru import logger
 import numpy as np
+from collections import defaultdict
 
 from ..dataset import (
     DBBColumnDType,
@@ -133,14 +134,12 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
                 column_groups.append([(cid.table, cid.column) for cid in cg])
         
         # Then, create column groups for task columns with shared_schema
-        shared_schema_groups = {}
+        shared_schema_groups = defaultdict(list)
         for task in dataset.tasks:
             task_table_name = make_task_table_name(task.metadata.name)
             for col_schema in task.metadata.columns:
                 if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
                     shared_schema = col_schema.shared_schema
-                    if shared_schema not in shared_schema_groups:
-                        shared_schema_groups[shared_schema] = []
                     # Add both the task column and the referenced data column to the group
                     task_col_ref = (task_table_name, col_schema.name)
                     data_table, data_col = shared_schema.split('.')
@@ -222,20 +221,26 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
         task_column_groups = []
         for task in dataset.tasks:
             task_table_name = make_task_table_name(task.metadata.name)
-            shared_schema_groups = {}
+            shared_schema_groups = defaultdict(list)
             for col_schema in task.metadata.columns:
                 if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
                     shared_schema = col_schema.shared_schema
-                    if shared_schema not in shared_schema_groups:
-                        shared_schema_groups[shared_schema] = []
+                    # Add both the task column and the referenced data column to the group
                     task_col_ref = (task_table_name, col_schema.name)
-                    shared_schema_groups[shared_schema].append(task_col_ref)
-            
-            # Add groups to task_column_groups
+                    data_table, data_col = shared_schema.split('.')
+                    data_col_ref = (data_table, data_col)
+                    
+                    # Only add if not already in the group
+                    if task_col_ref not in shared_schema_groups[shared_schema]:
+                        shared_schema_groups[shared_schema].append(task_col_ref)
+                    if data_col_ref not in shared_schema_groups[shared_schema]:
+                        shared_schema_groups[shared_schema].append(data_col_ref)
+
+            # Add the shared schema groups to column_groups
             for group in shared_schema_groups.values():
-                if len(group) >= 1:  # Even single columns can be in groups for consistency
+                if len(group) > 1:  # Only add groups with multiple columns
                     task_column_groups.append(group)
-        
+            
         task_data_fit = RDBData(fit_table, task_column_groups, None)
         task_data_transform = {
             task_name : RDBData(task_table, task_column_groups, None)
