@@ -480,6 +480,91 @@ config = {
 
 This architecture provides a flexible, extensible foundation for complex data preprocessing workflows while maintaining clean separation of concerns and supporting both programmatic and declarative configuration approaches.
 
+## Transform Behavior and Column Groups
+
+### Fit/Transform Workflow
+
+FastDFS uses a scikit-learn style fit/transform pattern with precise data usage:
+
+**Fitting Data**: All data tables + task tables' train split  
+**Transforming Data**: All tables (data tables + all task table splits)
+
+#### Example: Link Prediction Task
+
+Dataset structure:
+```yaml
+# Data tables (always available)
+tables:
+  - name: "user"
+    source: "data/user.npz"
+    columns:
+      - name: user_id
+        dtype: primary_key
+      - name: user_feature_0
+        dtype: float
+  - name: "item"
+    source: "data/item.npz" 
+    columns:
+      - name: item_id
+        dtype: primary_key
+      - name: item_feature_0
+        dtype: float
+
+# Task tables (train/val/test splits)
+tasks:
+  - name: "linkpred"
+    source: "linkpred/{split}.npz"  # Creates train/val/test splits
+    columns:
+      - name: user_id
+        shared_schema: interaction.user_id
+      - name: item_id
+        shared_schema: interaction.item_id
+      - name: timestamp
+        shared_schema: interaction.timestamp
+      - name: label
+        dtype: category
+```
+
+Transform workflow:
+```python
+# 1. FITTING: Use all data tables + train split only
+fit_data = {
+    "user": user.npz,              # All user data
+    "item": item.npz,              # All item data  
+    "linkpred_train": linkpred/train.npz  # Only training split
+}
+# Fit normalizer on combined data: mean=0.5, std=0.2
+
+# 2. TRANSFORMING: Apply to all tables
+transform_tables = [
+    "user",           # Data table
+    "item",           # Data table
+    "linkpred_train", # Task table (train)
+    "linkpred_val",   # Task table (validation) 
+    "linkpred_test"   # Task table (test)
+]
+# All use same fitted parameters: (x - 0.5) / 0.2
+```
+
+### Column Groups
+
+Column groups coordinate transforms across tables with the same `shared_schema`:
+
+```python
+# Columns with shared_schema="interaction.user_id" form column groups:
+column_groups = {
+    "interaction.user_id": ["linkpred_train.user_id", "linkpred_val.user_id", "linkpred_test.user_id"],
+    "interaction.timestamp": ["linkpred_train.timestamp", "linkpred_val.timestamp", "linkpred_test.timestamp"]
+}
+
+# Workflow:
+# 1. Fit on linkpred_train.user_id only
+# 2. Transform all: linkpred_train.user_id, linkpred_val.user_id, linkpred_test.user_id
+#    (using same fitted parameters)
+```
+
+This ensures consistent preprocessing where validation and test data are transformed using parameters learned only from training data, preventing data leakage while handling unseen values properly.
+
 ## Additional Resources
 
 - **API Documentation**: [`fastdfs/api.py`](../fastdfs/api.py) - Main public API
