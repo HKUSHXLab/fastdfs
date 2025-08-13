@@ -54,11 +54,21 @@ class DBBColumnSchema(pydantic.BaseModel):
 
     # Column name.
     name : str
-    # Column data type.
-    dtype : DBBColumnDType
+    # Column data type. Optional when shared_schema is provided.
+    dtype : Optional[DBBColumnDType] = None
     # Optional reference to a data table column this task column shares schema with.
     # Format: "table_name.column_name"
     shared_schema : Optional[str] = None
+    
+    @pydantic.root_validator
+    def validate_dtype_or_shared_schema(cls, values):
+        """Ensure dtype is provided either directly or via shared_schema."""
+        dtype = values.get('dtype')
+        shared_schema = values.get('shared_schema')
+        
+        if dtype is None and not shared_schema:
+            raise ValueError('dtype is required when shared_schema is not provided')
+        return values
 
 class DBBTableDataFormat(str, Enum):
     PARQUET = 'parquet'

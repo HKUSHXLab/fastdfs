@@ -40,18 +40,11 @@ tables:
   time_column: timestamp
 tasks:
 - columns:
-  - capacity: 100
-    dtype: foreign_key
-    link_to: user.user_id
-    name: user_id
-    shared_schema: user.user_id
-  - capacity: 100
-    dtype: foreign_key
-    link_to: item.item_id
-    name: item_id
-    shared_schema: item.item_id
-  - dtype: datetime
-    name: timestamp
+  - name: user_id
+    shared_schema: interaction.user_id
+  - name: item_id
+    shared_schema: interaction.item_id
+  - name: timestamp
     shared_schema: interaction.timestamp
   - dtype: category
     name: label

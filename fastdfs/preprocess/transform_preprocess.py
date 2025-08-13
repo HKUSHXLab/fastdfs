@@ -33,25 +33,6 @@ class RDBTransformPreprocessConfig(pydantic.BaseModel):
 
 @rdb_preprocess
 class RDBTransformPreprocess(RDBDatasetPreprocess):
-    """
-    RDB dataset preprocessor that applies a configurable chain of data transformations.
-    
-    This preprocessor converts on-disk RDB datasets into in-memory RDBData objects,
-    applies a sequence of transformations, and outputs a new transformed dataset.
-    It handles both shared table data and task-specific data, ensuring proper
-    separation during the fit/transform process.
-    
-    The preprocessor supports:
-    - Configurable transformation pipelines via YAML
-    - Proper handling of train/validation/test splits
-    - Shared schema management between tasks and data tables
-    - Metadata and relationship preservation
-    
-    Attributes:
-        config_class: RDBTransformPreprocessConfig for validation
-        name: "transform" - identifier for this preprocessor
-        default_config: Default transformation pipeline configuration
-    """
 
     config_class = RDBTransformPreprocessConfig
     name : str = "transform"
@@ -131,19 +112,6 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
         ctor.done(output_path)
 
     def extract_data(self, dataset : DBBRDBDataset) -> RDBData:
-        """
-        Extract data tables from the dataset into in-memory RDBData format.
-        
-        This method converts the on-disk table data into the in-memory RDBData
-        representation, preserving metadata and relationships. It handles
-        time column annotations and column group structures.
-        
-        Args:
-            dataset: Input RDB dataset to extract data from
-            
-        Returns:
-            RDBData object containing all table data with metadata
-        """
         tables = {tbl_name : {} for tbl_name in dataset.tables}
         for tbl_schema in dataset.metadata.tables:
             tbl_name = tbl_schema.name
@@ -154,11 +122,40 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
                     col_meta['is_time_column'] = True
                 tables[tbl_name][col_name] = ColumnData(
                     col_meta, dataset.tables[tbl_name][col_name])
-        column_groups = None
+        
+        # Create column groups based on shared_schema
+        column_groups = []
+        
+        # First, add existing column groups from dataset metadata
         if dataset.metadata.column_groups is not None:
-            column_groups = []
             for cg in dataset.metadata.column_groups:
                 column_groups.append([(cid.table, cid.column) for cid in cg])
+        
+        # Then, create column groups for task columns with shared_schema
+        shared_schema_groups = {}
+        for task in dataset.tasks:
+            task_table_name = make_task_table_name(task.metadata.name)
+            for col_schema in task.metadata.columns:
+                if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
+                    shared_schema = col_schema.shared_schema
+                    if shared_schema not in shared_schema_groups:
+                        shared_schema_groups[shared_schema] = []
+                    # Add both the task column and the referenced data column to the group
+                    task_col_ref = (task_table_name, col_schema.name)
+                    data_table, data_col = shared_schema.split('.')
+                    data_col_ref = (data_table, data_col)
+                    
+                    # Only add if not already in the group
+                    if task_col_ref not in shared_schema_groups[shared_schema]:
+                        shared_schema_groups[shared_schema].append(task_col_ref)
+                    if data_col_ref not in shared_schema_groups[shared_schema]:
+                        shared_schema_groups[shared_schema].append(data_col_ref)
+        
+        # Add the shared schema groups to column_groups
+        for group in shared_schema_groups.values():
+            if len(group) > 1:  # Only add groups with multiple columns
+                column_groups.append(group)
+        
         relationships = None
         if dataset.metadata.relationships is not None:
             relationships = []
@@ -171,29 +168,18 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
         self,
         dataset : DBBRDBDataset,
     ) -> Tuple[RDBData, Dict[str, RDBData]]:
-        """
-        Extract task-specific data and separate it into fit and transform sets.
-        
-        This method processes task data and determines which columns need to be
-        fitted (task-specific data) vs. which can use existing transforms (shared
-        schema data). It properly handles the concatenation of train/val/test splits.
-        
-        Args:
-            dataset: Input RDB dataset containing task data
-            
-        Returns:
-            Tuple of:
-            - RDBData for fitting (task-specific columns)
-            - Dict mapping task names to RDBData for transform-only (shared columns)
-        """
         fit_table = {}
         transform_tables = {
             task.metadata.name : {}
             for task in dataset.tasks
         }
         
-        # Build a mapping from table name to table schema for quick lookup
-        table_schema_map = {tbl_schema.name: tbl_schema for tbl_schema in dataset.metadata.tables}
+        # Build a mapping from table.column to schema for metadata inference
+        data_schema_map = {}
+        for tbl_schema in dataset.metadata.tables:
+            for col_schema in tbl_schema.columns:
+                key = f"{tbl_schema.name}.{col_schema.name}"
+                data_schema_map[key] = col_schema
         
         for task_id, task in enumerate(dataset.tasks):
             task_name = task.metadata.name
@@ -203,26 +189,55 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
             transform_tables[task_name][task_table_name] = {}
             for col_schema in task.metadata.columns:
                 col = col_schema.name
-                col_data = np.concatenate([
-                    task.train_set[col],
-                    task.validation_set[col],
-                    task.test_set[col]
-                ], axis=0)
                 col_meta = dict(col_schema)
+                
+                # If column has shared_schema, infer metadata from the referenced data column
+                if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
+                    shared_schema_key = col_schema.shared_schema
+                    if shared_schema_key in data_schema_map:
+                        ref_schema = data_schema_map[shared_schema_key]
+                        # Copy metadata from referenced column, but preserve any explicitly set values
+                        for field in ['dtype', 'link_to', 'capacity']:
+                            if field not in col_meta or col_meta[field] is None:
+                                if hasattr(ref_schema, field):
+                                    col_meta[field] = getattr(ref_schema, field)
+                
                 if col == task.metadata.time_column:
                     col_meta['is_time_column'] = True
                 
-                # Check if column has shared schema with a data table column
+                # Training data always goes to fit_table for learning parameters
+                train_data = task.train_set[col]
+                fit_table[task_table_name][col] = ColumnData(col_meta, train_data)
+                
+                # Validation and test data go to transform_tables for applying learned transforms
+                val_test_data = np.concatenate([
+                    task.validation_set[col],
+                    task.test_set[col]
+                ], axis=0)
+                transform_tables[task_name][task_table_name][col] = \
+                    ColumnData(col_meta, val_test_data)
+        
+        # Create column groups for task data based on shared_schema
+        task_column_groups = []
+        for task in dataset.tasks:
+            task_table_name = make_task_table_name(task.metadata.name)
+            shared_schema_groups = {}
+            for col_schema in task.metadata.columns:
                 if hasattr(col_schema, 'shared_schema') and col_schema.shared_schema:
-                    # Column shares schema with existing data table column - needs only transform
-                    transform_tables[task_name][task_table_name][col] = \
-                        ColumnData(col_meta, col_data)
-                else:
-                    # Task-specific data needs fit-and-transform
-                    fit_table[task_table_name][col] = ColumnData(col_meta, col_data)
-        task_data_fit = RDBData(fit_table)
+                    shared_schema = col_schema.shared_schema
+                    if shared_schema not in shared_schema_groups:
+                        shared_schema_groups[shared_schema] = []
+                    task_col_ref = (task_table_name, col_schema.name)
+                    shared_schema_groups[shared_schema].append(task_col_ref)
+            
+            # Add groups to task_column_groups
+            for group in shared_schema_groups.values():
+                if len(group) >= 1:  # Even single columns can be in groups for consistency
+                    task_column_groups.append(group)
+        
+        task_data_fit = RDBData(fit_table, task_column_groups, None)
         task_data_transform = {
-            task_name : RDBData(task_table)
+            task_name : RDBData(task_table, task_column_groups, None)
             for task_name, task_table in transform_tables.items()
         }
         return task_data_fit, task_data_transform
