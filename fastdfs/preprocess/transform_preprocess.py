@@ -18,6 +18,7 @@ from .base import RDBDatasetPreprocess, rdb_preprocess
 from .transform import (
     RDBData,
     ColumnData,
+    RDBTransform,
     get_rdb_transform_class,
     is_task_table,
     make_task_table_name,
@@ -71,7 +72,7 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
 
     def __init__(self, config : RDBTransformPreprocessConfig):
         super().__init__(config)
-        self.transforms = []
+        self.transforms : List[RDBTransform] = []
         for xcfg in config.transforms:
             xform_class = get_rdb_transform_class(xcfg.name)
             xform_config = xform_class.config_class.parse_obj(xcfg.config)
@@ -196,11 +197,11 @@ class RDBTransformPreprocess(RDBDatasetPreprocess):
                     shared_schema_key = col_schema.shared_schema
                     if shared_schema_key in data_schema_map:
                         ref_schema = data_schema_map[shared_schema_key]
-                        # Copy metadata from referenced column, but preserve any explicitly set values
-                        for field in ['dtype', 'link_to', 'capacity']:
+                        # Copy all metadata from referenced column, preserving explicitly set values
+                        ref_meta_dict = dict(ref_schema)
+                        for field, value in ref_meta_dict.items():
                             if field not in col_meta or col_meta[field] is None:
-                                if hasattr(ref_schema, field):
-                                    col_meta[field] = getattr(ref_schema, field)
+                                col_meta[field] = value
                 
                 if col == task.metadata.time_column:
                     col_meta['is_time_column'] = True

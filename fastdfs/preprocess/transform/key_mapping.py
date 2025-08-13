@@ -52,30 +52,26 @@ class KeyMapping(RDBTransform):
             self.fk_to_pk[(pk_tbl, pk_col)] = (pk_tbl, pk_col)
 
         # Search for primary keys and foreign keys in task table to add extra relationships.
+        # Since column groups now handle shared_schema relationships, we can rely on
+        # the existing relationships and link_to metadata that was inferred.
         for tbl_name, tbl in rdb_data.tables.items():
             if not is_task_table(tbl_name):
                 continue
             for col_name, col in tbl.items():
                 if col.metadata['dtype'] == DBBColumnDType.primary_key:
-                    # For primary keys in task tables, we need to find the referenced table
-                    # from the shared_schema field
-                    shared_schema = col.metadata.get('shared_schema')
-                    if shared_schema:
-                        target_table_name, target_col_name = shared_schema.split('.')
+                    # For primary keys in task tables, use the link_to metadata
+                    link_to = col.metadata.get('link_to')
+                    if link_to and '.' in link_to:
+                        target_table_name, target_col_name = link_to.split('.')
                         self.fk_to_pk[(tbl_name, col_name)] = (target_table_name, target_col_name)
                         self.pk_to_fk_list[(target_table_name, target_col_name)].append((tbl_name, col_name))
                 elif col.metadata['dtype'] == DBBColumnDType.foreign_key:
-                    # For foreign keys in task tables, check if they have shared_schema
-                    shared_schema = col.metadata.get('shared_schema')
-                    if shared_schema:
-                        target_table_name, target_col_name = shared_schema.split('.')
-                        # Find the primary key that this foreign key refers to
-                        for rel in rdb_data.relationships:
-                            fk_tbl, fk_col, pk_tbl, pk_col = rel
-                            if fk_tbl == target_table_name and fk_col == target_col_name:
-                                self.fk_to_pk[(tbl_name, col_name)] = (pk_tbl, pk_col)
-                                self.pk_to_fk_list[(pk_tbl, pk_col)].append((tbl_name, col_name))
-                                break
+                    # For foreign keys in task tables, use the link_to metadata
+                    link_to = col.metadata.get('link_to')
+                    if link_to and '.' in link_to:
+                        target_table_name, target_col_name = link_to.split('.')
+                        self.fk_to_pk[(tbl_name, col_name)] = (target_table_name, target_col_name)
+                        self.pk_to_fk_list[(target_table_name, target_col_name)].append((tbl_name, col_name))
         
         # Remapping
         self.mappings = {}

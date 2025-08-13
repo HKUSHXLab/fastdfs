@@ -1,9 +1,7 @@
-from typing import Tuple, Dict, Optional, List
+from typing import  Dict
 from collections import defaultdict
 import numpy as np
-import pydantic
 from loguru import logger
-from ...dataset import DBBColumnDType
 
 from ...utils.device import DeviceInfo
 from .base import (
@@ -11,9 +9,8 @@ from .base import (
     get_column_transform_class,
     ColumnData,
     RDBData,
-    is_task_table,
-    unmake_task_table_name,
 )
+from ...dataset import DBBColumnDType
 
 class RDBTransformWrapper(RDBTransform):
 
@@ -97,9 +94,6 @@ class RDBTransformWrapper(RDBTransform):
             for col_name, col in table.items():
                 # Get transform.
                 xform = to_xform.get((tbl_name, col_name), None)
-                if xform is None and is_task_table(tbl_name):
-                    _, target_table = unmake_task_table_name(tbl_name)
-                    xform = to_xform.get((target_table, col_name), None)
                 # Conduct transformation.
                 if xform is not None:
                     logger.info(f"Transforming table/column {tbl_name}/{col_name}.")
