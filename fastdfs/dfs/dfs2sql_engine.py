@@ -87,10 +87,12 @@ class DFS2SQLEngine(DFSEngine):
             )
 
             # Merge with original target dataframe to preserve original columns and order
-            original_target_with_index = target_dataframe.copy()
-            if target_index not in original_target_with_index.columns:
-                # Re-create the index column if it was synthetic
+            # Shallow copy to allow adding synthetic index column without affecting original
+            if target_index not in target_dataframe.columns:
+                original_target_with_index = target_dataframe.copy(deep=False)
                 original_target_with_index[target_index] = self._determine_target_index(original_target_with_index, key_mappings)
+            else:
+                original_target_with_index = target_dataframe
 
             # Merge to get original columns + new features
             result = pd.merge(
@@ -119,14 +121,15 @@ class DFS2SQLEngine(DFSEngine):
 
         # Add all RDB tables to database
         for table_name in rdb.table_names:
-            df = rdb.get_table(table_name).copy()
+            df = rdb.get_table(table_name)
             table_meta = rdb.get_table_metadata(table_name)
 
             # Get the appropriate index column
             index_col = self._get_table_index(table_meta)
 
-            # Add __index__ column if it doesn't have a primary key
+            # Add __index__ column if it doesn't have a primary key (shallow copy for new columns)
             if index_col == "__index__" and "__index__" not in df.columns:
+                df = df.copy(deep=False)  # Shallow copy - shares data but allows new columns
                 df["__index__"] = range(len(df))
 
             # Add table to database
@@ -138,24 +141,28 @@ class DFS2SQLEngine(DFSEngine):
             )
 
         # Add target dataframe as __target__ table
-        target_df_copy = target_dataframe.copy()
-        if target_index not in target_df_copy.columns:
-            # Re-create the index column if it was synthetic
-            target_df_copy[target_index] = self._determine_target_index(target_df_copy, {})
+        target_df_for_db = target_dataframe
+        needs_index_column = target_index not in target_dataframe.columns
+        
+        if needs_index_column:
+            # Shallow copy to allow adding synthetic index column without affecting original
+            target_df_for_db = target_dataframe.copy(deep=False)
+            target_df_for_db[target_index] = self._determine_target_index(target_df_for_db, {})
 
         builder.add_dataframe(
             dataframe_name="__target__",
-            dataframe=target_df_copy,
+            dataframe=target_df_for_db,
             index=target_index,
             time_index=cutoff_time_column
         )
 
         builder.index_name = target_index
-        builder.index = target_df_copy[target_index].values
+        builder.index = target_df_for_db[target_index].values
 
         # Set up cutoff time information
         if cutoff_time_column:
-            cutoff_time = target_df_copy[[target_index, cutoff_time_column]].copy()
+            # Create cutoff time dataframe with only necessary columns (shallow copy)
+            cutoff_time = target_df_for_db[[target_index, cutoff_time_column]].copy()
             cutoff_time.columns = [target_index, "time"]
             builder.set_cutoff_time(cutoff_time)
 

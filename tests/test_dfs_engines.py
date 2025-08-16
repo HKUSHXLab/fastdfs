@@ -226,17 +226,17 @@ class TestDFS2SQLEngine:
 
 class TestEngineComparison:
     """Test that Featuretools and DFS2SQL engines produce equivalent results."""
-    
+
     def test_engines_produce_same_features_basic(self, rdb_dataset, target_dataframe, key_mappings):
         """Test that both engines produce the same features without cutoff time."""
-        
+
         # Configure both engines with identical settings
         config = DFSConfig(
             max_depth=2,
             agg_primitives=["count", "mean"],
             use_cutoff_time=False
         )
-        
+
         # Compute features with Featuretools engine
         ft_engine = get_dfs_engine("featuretools", config)
         ft_result = ft_engine.compute_features(
@@ -245,7 +245,7 @@ class TestEngineComparison:
             key_mappings=key_mappings,
             cutoff_time_column=None
         )
-        
+
         # Compute features with DFS2SQL engine
         sql_engine = get_dfs_engine("dfs2sql", config)
         sql_result = sql_engine.compute_features(
@@ -254,37 +254,37 @@ class TestEngineComparison:
             key_mappings=key_mappings,
             cutoff_time_column=None
         )
-        
+
         # Both should have same shape
         assert ft_result.shape == sql_result.shape, f"Shape mismatch: FT {ft_result.shape} vs SQL {sql_result.shape}"
-        
+
         # Both should have same columns (order may differ)
         ft_feature_cols = [col for col in ft_result.columns if col not in target_dataframe.columns]
         sql_feature_cols = [col for col in sql_result.columns if col not in target_dataframe.columns]
-        
+
         assert set(ft_feature_cols) == set(sql_feature_cols), f"Feature columns differ: FT {ft_feature_cols} vs SQL {sql_feature_cols}"
-        
+
         # Check that feature values are equivalent (within numerical tolerance)
         for col in ft_feature_cols:
             ft_values = ft_result[col].fillna(0).values
             sql_values = sql_result[col].fillna(0).values
-            
+
             # Use numpy allclose for numerical comparison
             import numpy as np
             assert np.allclose(ft_values, sql_values, rtol=1e-5, atol=1e-8), f"Values differ for column {col}"
-        
+
         print(f"✓ Both engines produced {len(ft_feature_cols)} equivalent features")
-    
+
     def test_engines_produce_same_features_with_cutoff_time(self, rdb_dataset, target_dataframe, key_mappings):
         """Test that both engines produce the same features with cutoff time."""
-        
+
         # Configure both engines with identical settings including cutoff time
         config = DFSConfig(
             max_depth=2,
             agg_primitives=["count", "mean"],
             use_cutoff_time=True
         )
-        
+
         # Compute features with Featuretools engine
         ft_engine = get_dfs_engine("featuretools", config)
         ft_result = ft_engine.compute_features(
@@ -293,7 +293,7 @@ class TestEngineComparison:
             key_mappings=key_mappings,
             cutoff_time_column="interaction_time"
         )
-        
+
         # Compute features with DFS2SQL engine
         sql_engine = get_dfs_engine("dfs2sql", config)
         sql_result = sql_engine.compute_features(
@@ -302,25 +302,24 @@ class TestEngineComparison:
             key_mappings=key_mappings,
             cutoff_time_column="interaction_time"
         )
-        
+
         # Both should have same shape
         assert ft_result.shape == sql_result.shape, f"Shape mismatch: FT {ft_result.shape} vs SQL {sql_result.shape}"
-        
+
         # Both should have same columns (order may differ)
         ft_feature_cols = [col for col in ft_result.columns if col not in target_dataframe.columns]
         sql_feature_cols = [col for col in sql_result.columns if col not in target_dataframe.columns]
-        
+
         assert set(ft_feature_cols) == set(sql_feature_cols), f"Feature columns differ: FT {ft_feature_cols} vs SQL {sql_feature_cols}"
-        
+
         # Check that feature values are equivalent (within numerical tolerance)
         for col in ft_feature_cols:
             ft_values = ft_result[col].fillna(0).values
             sql_values = sql_result[col].fillna(0).values
-            
+
             # Use numpy allclose for numerical comparison
-            import numpy as np
             assert np.allclose(ft_values, sql_values, rtol=1e-5, atol=1e-8), f"Values differ for column {col}"
-        
+
         print(f"✓ Both engines produced {len(ft_feature_cols)} equivalent features with cutoff time")
 
 
