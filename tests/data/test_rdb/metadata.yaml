@@ -2,11 +2,9 @@ column_groups: null
 dataset_name: sbm_user_item
 tables:
 - columns:
-  - capacity: 100
-    dtype: primary_key
+  - dtype: primary_key
     name: user_id
   - dtype: float
-    in_size: 1
     name: user_feature_0
   format: numpy
   name: user
