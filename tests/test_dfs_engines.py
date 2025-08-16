@@ -20,7 +20,7 @@ def test_data_path():
     """Path to new RDB test dataset."""
     return Path(__file__).parent / "data" / "test_rdb_new"
 
-@pytest.fixture 
+@pytest.fixture
 def rdb_dataset(test_data_path):
     """Load RDB dataset directly from new test data."""
     return RDBDataset(test_data_path)
@@ -31,16 +31,16 @@ def target_dataframe(rdb_dataset):
     # Get some real user and item IDs from the dataset
     user_table = rdb_dataset.get_table('user')
     item_table = rdb_dataset.get_table('item')
-    
+
     # Take first few users and items
     user_ids = user_table['user_id'].head(3).tolist()
     item_ids = item_table['item_id'].head(3).tolist()
-    
+
     return pd.DataFrame({
         "user_id": [user_ids[0], user_ids[1], user_ids[2], user_ids[0], user_ids[1]],
         "item_id": [item_ids[0], item_ids[1], item_ids[2], item_ids[1], item_ids[0]],
         "interaction_time": pd.to_datetime([
-            "2024-01-01", "2024-01-02", "2024-01-03", 
+            "2024-01-01", "2024-01-02", "2024-01-03",
             "2024-01-04", "2024-01-05"
         ])
     })
@@ -56,17 +56,17 @@ def key_mappings():
 
 class TestDFSConfig:
     """Test DFS configuration."""
-    
+
     def test_default_config(self):
         """Test default DFS configuration."""
         config = DFSConfig()
-        
+
         assert config.max_depth == 2
         assert config.use_cutoff_time == True
         assert config.engine == "featuretools"
         assert "count" in config.agg_primitives
         assert "mean" in config.agg_primitives
-    
+
     def test_custom_config(self):
         """Test custom DFS configuration."""
         config = DFSConfig(
@@ -75,7 +75,7 @@ class TestDFSConfig:
             agg_primitives=["count", "sum"],
             use_cutoff_time=False
         )
-        
+
         assert config.max_depth == 3
         assert config.engine == "dfs2sql"
         assert config.agg_primitives == ["count", "sum"]
@@ -84,13 +84,13 @@ class TestDFSConfig:
 
 class TestEngineRegistration:
     """Test DFS engine registration system."""
-    
+
     def test_get_dfs_engine_featuretools(self):
         """Test getting the Featuretools DFS engine."""
         config = DFSConfig(engine="featuretools")
         engine = get_dfs_engine("featuretools", config)
         assert isinstance(engine, FeaturetoolsEngine)
-    
+
     def test_get_dfs_engine_dfs2sql(self):
         """Test getting the DFS2SQL engine."""
         config = DFSConfig(engine="dfs2sql")
@@ -100,25 +100,25 @@ class TestEngineRegistration:
 
 class TestFeaturetoolsEngine:
     """Test Featuretools engine implementation."""
-    
+
     def test_engine_registration(self):
         """Test that Featuretools engine is properly registered."""
         config = DFSConfig(engine="featuretools")
         engine = get_dfs_engine("featuretools", config)
         assert isinstance(engine, FeaturetoolsEngine)
         assert engine.name == "featuretools"
-    
+
     def test_compute_features_basic(self, rdb_dataset, target_dataframe, key_mappings):
         """Test basic feature computation with Featuretools engine."""
         config = DFSConfig(
             engine="featuretools",
-            max_depth=1,
+            max_depth=2,
             agg_primitives=["count", "mean"],
             use_cutoff_time=False
         )
-        
+
         engine = get_dfs_engine("featuretools", config)
-        
+
         # Compute features
         result_df = engine.compute_features(
             rdb=rdb_dataset,
@@ -126,31 +126,34 @@ class TestFeaturetoolsEngine:
             key_mappings=key_mappings,
             cutoff_time_column=None
         )
-        
+
+        print(result_df.columns)
+
         # Check that result contains original columns
         assert "user_id" in result_df.columns
         assert "item_id" in result_df.columns
         assert "interaction_time" in result_df.columns
-        
+
+        # Check the following features are in the result
+        assert "user.user_feature_0" in result_df.columns
+        assert "item.item_feature_0" in result_df.columns
+        assert "user.COUNT(interaction)" in result_df.columns
+        assert "item.COUNT(interaction)" in result_df.columns
+
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)
-        
-        # Check that some features were generated
-        feature_cols = [col for col in result_df.columns 
-                       if col not in target_dataframe.columns]
-        assert len(feature_cols) > 0, f"No features generated. Columns: {result_df.columns.tolist()}"
-    
+
     def test_compute_features_with_cutoff_time(self, rdb_dataset, target_dataframe, key_mappings):
         """Test feature computation with cutoff time."""
         config = DFSConfig(
             engine="featuretools",
-            max_depth=1,
-            agg_primitives=["count"],
+            max_depth=2,
+            agg_primitives=["count", "mean"],
             use_cutoff_time=True
         )
-        
+
         engine = get_dfs_engine("featuretools", config)
-        
+
         # Compute features with cutoff time
         result_df = engine.compute_features(
             rdb=rdb_dataset,
@@ -158,34 +161,44 @@ class TestFeaturetoolsEngine:
             key_mappings=key_mappings,
             cutoff_time_column="interaction_time"
         )
-        
-        # Check that result is valid
-        assert len(result_df) == len(target_dataframe)
+
+        print(result_df.columns)
+
+        # Check that result contains original columns
         assert "user_id" in result_df.columns
         assert "item_id" in result_df.columns
+        assert "interaction_time" in result_df.columns
 
+        # Check the following features are in the result
+        assert "user.user_feature_0" in result_df.columns
+        assert "item.item_feature_0" in result_df.columns
+        assert "user.COUNT(interaction)" in result_df.columns
+        assert "item.COUNT(interaction)" in result_df.columns
+
+        # Check that result has same number of rows
+        assert len(result_df) == len(target_dataframe)
 
 class TestDFS2SQLEngine:
     """Test DFS2SQL engine implementation."""
-    
+
     def test_engine_registration(self):
         """Test that DFS2SQL engine is properly registered."""
         config = DFSConfig(engine="dfs2sql")
         engine = get_dfs_engine("dfs2sql", config)
         assert isinstance(engine, DFS2SQLEngine)
         assert engine.name == "dfs2sql"
-    
+
     def test_compute_features_basic(self, rdb_dataset, target_dataframe, key_mappings):
         """Test basic feature computation with DFS2SQL engine."""
         config = DFSConfig(
             engine="dfs2sql",
-            max_depth=1,
+            max_depth=2,
             agg_primitives=["count", "mean"],
             use_cutoff_time=False
         )
-        
+
         engine = get_dfs_engine("dfs2sql", config)
-        
+
         # Compute features
         result_df = engine.compute_features(
             rdb=rdb_dataset,
@@ -193,30 +206,133 @@ class TestDFS2SQLEngine:
             key_mappings=key_mappings,
             cutoff_time_column=None
         )
-        
+
+        print(result_df.columns)
+
         # Check that result contains original columns
         assert "user_id" in result_df.columns
         assert "item_id" in result_df.columns
         assert "interaction_time" in result_df.columns
-        
+
+        # Check the following features are in the result
+        assert "user.user_feature_0" in result_df.columns
+        assert "item.item_feature_0" in result_df.columns
+        assert "user.COUNT(interaction)" in result_df.columns
+        assert "item.COUNT(interaction)" in result_df.columns
+
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)
+
+
+class TestEngineComparison:
+    """Test that Featuretools and DFS2SQL engines produce equivalent results."""
+    
+    def test_engines_produce_same_features_basic(self, rdb_dataset, target_dataframe, key_mappings):
+        """Test that both engines produce the same features without cutoff time."""
         
-        # Check that some features were generated
-        feature_cols = [col for col in result_df.columns 
-                       if col not in target_dataframe.columns]
-        assert len(feature_cols) > 0, f"No features generated. Columns: {result_df.columns.tolist()}"
+        # Configure both engines with identical settings
+        config = DFSConfig(
+            max_depth=2,
+            agg_primitives=["count", "mean"],
+            use_cutoff_time=False
+        )
+        
+        # Compute features with Featuretools engine
+        ft_engine = get_dfs_engine("featuretools", config)
+        ft_result = ft_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column=None
+        )
+        
+        # Compute features with DFS2SQL engine
+        sql_engine = get_dfs_engine("dfs2sql", config)
+        sql_result = sql_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column=None
+        )
+        
+        # Both should have same shape
+        assert ft_result.shape == sql_result.shape, f"Shape mismatch: FT {ft_result.shape} vs SQL {sql_result.shape}"
+        
+        # Both should have same columns (order may differ)
+        ft_feature_cols = [col for col in ft_result.columns if col not in target_dataframe.columns]
+        sql_feature_cols = [col for col in sql_result.columns if col not in target_dataframe.columns]
+        
+        assert set(ft_feature_cols) == set(sql_feature_cols), f"Feature columns differ: FT {ft_feature_cols} vs SQL {sql_feature_cols}"
+        
+        # Check that feature values are equivalent (within numerical tolerance)
+        for col in ft_feature_cols:
+            ft_values = ft_result[col].fillna(0).values
+            sql_values = sql_result[col].fillna(0).values
+            
+            # Use numpy allclose for numerical comparison
+            import numpy as np
+            assert np.allclose(ft_values, sql_values, rtol=1e-5, atol=1e-8), f"Values differ for column {col}"
+        
+        print(f"✓ Both engines produced {len(ft_feature_cols)} equivalent features")
+    
+    def test_engines_produce_same_features_with_cutoff_time(self, rdb_dataset, target_dataframe, key_mappings):
+        """Test that both engines produce the same features with cutoff time."""
+        
+        # Configure both engines with identical settings including cutoff time
+        config = DFSConfig(
+            max_depth=2,
+            agg_primitives=["count", "mean"],
+            use_cutoff_time=True
+        )
+        
+        # Compute features with Featuretools engine
+        ft_engine = get_dfs_engine("featuretools", config)
+        ft_result = ft_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column="interaction_time"
+        )
+        
+        # Compute features with DFS2SQL engine
+        sql_engine = get_dfs_engine("dfs2sql", config)
+        sql_result = sql_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column="interaction_time"
+        )
+        
+        # Both should have same shape
+        assert ft_result.shape == sql_result.shape, f"Shape mismatch: FT {ft_result.shape} vs SQL {sql_result.shape}"
+        
+        # Both should have same columns (order may differ)
+        ft_feature_cols = [col for col in ft_result.columns if col not in target_dataframe.columns]
+        sql_feature_cols = [col for col in sql_result.columns if col not in target_dataframe.columns]
+        
+        assert set(ft_feature_cols) == set(sql_feature_cols), f"Feature columns differ: FT {ft_feature_cols} vs SQL {sql_feature_cols}"
+        
+        # Check that feature values are equivalent (within numerical tolerance)
+        for col in ft_feature_cols:
+            ft_values = ft_result[col].fillna(0).values
+            sql_values = sql_result[col].fillna(0).values
+            
+            # Use numpy allclose for numerical comparison
+            import numpy as np
+            assert np.allclose(ft_values, sql_values, rtol=1e-5, atol=1e-8), f"Values differ for column {col}"
+        
+        print(f"✓ Both engines produced {len(ft_feature_cols)} equivalent features with cutoff time")
 
 
 class TestHighLevelAPI:
     """Test the high-level API functions."""
-    
+
     def test_load_rdb(self, test_data_path):
         """Test loading RDB using high-level API."""
         rdb = load_rdb(str(test_data_path))
         assert isinstance(rdb, RDBDataset)
         assert len(rdb.table_names) == 3
-    
+
     def test_compute_dfs_features_default_config(self, rdb_dataset, target_dataframe, key_mappings):
         """Test computing features with default configuration."""
         result_df = compute_dfs_features(
@@ -224,12 +340,12 @@ class TestHighLevelAPI:
             target_dataframe=target_dataframe,
             key_mappings=key_mappings
         )
-        
+
         # Check basic properties
         assert len(result_df) == len(target_dataframe)
         assert "user_id" in result_df.columns
         assert "item_id" in result_df.columns
-    
+
     def test_compute_dfs_features_with_overrides(self, rdb_dataset, target_dataframe, key_mappings):
         """Test computing features with config overrides."""
         result_df = compute_dfs_features(
@@ -242,11 +358,11 @@ class TestHighLevelAPI:
                 "agg_primitives": ["count"]
             }
         )
-        
+
         # Check basic properties
         assert len(result_df) == len(target_dataframe)
         assert "user_id" in result_df.columns
-    
+
     def test_dfs_pipeline(self, rdb_dataset, target_dataframe, key_mappings):
         """Test DFS pipeline functionality."""
         config = DFSConfig(
@@ -254,18 +370,18 @@ class TestHighLevelAPI:
             agg_primitives=["count"],
             engine="featuretools"
         )
-        
+
         pipeline = DFSPipeline(
             transform_pipeline=None,  # No transforms for this test
             dfs_config=config
         )
-        
+
         result_df = pipeline.compute_features(
             rdb=rdb_dataset,
             target_dataframe=target_dataframe,
             key_mappings=key_mappings
         )
-        
+
         # Check basic properties
         assert len(result_df) == len(target_dataframe)
         assert "user_id" in result_df.columns
@@ -273,36 +389,36 @@ class TestHighLevelAPI:
 
 class TestEdgeCases:
     """Test edge cases and error conditions."""
-    
+
     def test_unknown_engine(self):
         """Test error for unknown engine name."""
         config = DFSConfig(engine="nonexistent")
-        
+
         with pytest.raises(ValueError, match="Unknown DFS engine"):
             get_dfs_engine("nonexistent", config)
-    
+
     def test_empty_target_dataframe(self, rdb_dataset, key_mappings):
         """Test behavior with empty target dataframe."""
         empty_df = pd.DataFrame(columns=["user_id", "item_id"])
-        
+
         result_df = compute_dfs_features(
             rdb=rdb_dataset,
             target_dataframe=empty_df,
             key_mappings=key_mappings,
             config_overrides={"max_depth": 1}
         )
-        
+
         # Should return empty dataframe with original columns
         assert len(result_df) == 0
         assert "user_id" in result_df.columns
         assert "item_id" in result_df.columns
-    
+
     def test_invalid_key_mappings(self, rdb_dataset, target_dataframe):
         """Test error for invalid key mappings."""
         invalid_mappings = {
             "user_id": "nonexistent.column"
         }
-        
+
         # This should raise an error when trying to build relationships
         with pytest.raises(Exception):  # Could be various types depending on implementation
             compute_dfs_features(

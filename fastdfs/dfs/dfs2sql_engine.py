@@ -19,12 +19,12 @@ from ..preprocess.dfs.database import DuckDBBuilder
 __all__ = ['DFS2SQLEngine']
 
 
-@dfs_engine  
+@dfs_engine
 class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
-    
+
     name = "dfs2sql"
-    
+
     def compute_feature_matrix(
         self,
         rdb: RDBDataset,
@@ -35,24 +35,33 @@ class DFS2SQLEngine(DFSEngine):
         config: DFSConfig
     ) -> pd.DataFrame:
         """Compute feature values using SQL generation (reuse existing computation logic)."""
-        
+
         # Set up database with RDB tables + target table
         target_index = self._determine_target_index(target_dataframe, key_mappings)
         builder = DuckDBBuilder(Path(config.engine_path))
         self._build_database_tables(builder, rdb, target_dataframe, target_index, cutoff_time_column)
         db = builder.db
-        
+
         # Generate SQLs from feature specifications (reuse existing features2sql logic)
         has_cutoff_time = config.use_cutoff_time and cutoff_time_column is not None
+        if has_cutoff_time:
+            time_columns = builder.time_columns
+            cutoff_time_table_name = builder.cutoff_time_table_name
+            cutoff_time_col_name = builder.cutoff_time_col_name
+        else:
+            time_columns = None
+            cutoff_time_table_name = None
+            cutoff_time_col_name = None
+
         sqls = features2sql(
             features,
             target_index,
             has_cutoff_time=has_cutoff_time,
-            cutoff_time_table_name="__target__",
-            cutoff_time_col_name=cutoff_time_column,
-            time_col_mapping=builder.time_columns
+            cutoff_time_table_name=cutoff_time_table_name,
+            cutoff_time_col_name=cutoff_time_col_name,
+            time_col_mapping=time_columns,
         )
-        
+
         # Execute SQLs and merge results (reuse existing logic)
         logger.debug("Executing SQLs ...")
         dataframes = []
@@ -61,26 +70,28 @@ class DFS2SQLEngine(DFSEngine):
             result = db.sql(sql.sql())
             if result is not None:
                 dataframe = result.df()
-                
+
                 # Clean up result dataframe (reuse existing logic)
-                if cutoff_time_column and cutoff_time_column in dataframe.columns:
-                    dataframe.drop(columns=[cutoff_time_column], inplace=True)
+                if cutoff_time_col_name in dataframe.columns:
+                    dataframe.drop(columns=[cutoff_time_col_name], inplace=True)
                 dataframe.rename(decode_column_from_sql, axis="columns", inplace=True)
                 dataframes.append(dataframe)
-        
+            else:
+                logger.warning(f"SQL execution returned None for: {format_sql(sql.sql())}")
+
         # Merge all feature dataframes
         if dataframes:
             logger.debug("Finalizing ...")
             merged_df = pd.DataFrame(
                 reduce(lambda left, right: pd.merge(left, right, on=target_index), dataframes)
             )
-            
+
             # Merge with original target dataframe to preserve original columns and order
             original_target_with_index = target_dataframe.copy()
             if target_index not in original_target_with_index.columns:
                 # Re-create the index column if it was synthetic
                 original_target_with_index[target_index] = self._determine_target_index(original_target_with_index, key_mappings)
-            
+
             # Merge to get original columns + new features
             result = pd.merge(
                 original_target_with_index,
@@ -88,60 +99,66 @@ class DFS2SQLEngine(DFSEngine):
                 on=target_index,
                 how='left'
             )
-            
-            # Remove the synthetic index column if it was added
-            if len(key_mappings) > 1 and "_index" in target_index:
-                result = result.drop(columns=[target_index])
-            
+
+            # Remove the synthetic target index
+            result = result.drop(columns=[target_index])
+
             return result
         else:
-            return target_dataframe.copy()
-    
+            return target_dataframe
+
     def _build_database_tables(
-        self, 
-        builder: DuckDBBuilder, 
-        rdb: RDBDataset, 
+        self,
+        builder: DuckDBBuilder,
+        rdb: RDBDataset,
         target_dataframe: pd.DataFrame,
         target_index: str,
         cutoff_time_column: Optional[str]
     ):
         """Build database tables for SQL execution (adapted from existing build_dataframes logic)."""
-        
+
         # Add all RDB tables to database
         for table_name in rdb.table_names:
-            df = rdb.get_table(table_name)
+            df = rdb.get_table(table_name).copy()
             table_meta = rdb.get_table_metadata(table_name)
-            
+
+            # Get the appropriate index column
+            index_col = self._get_table_index(table_meta)
+
+            # Add __index__ column if it doesn't have a primary key
+            if index_col == "__index__" and "__index__" not in df.columns:
+                df["__index__"] = range(len(df))
+
             # Add table to database
             builder.add_dataframe(
                 dataframe_name=table_name,
                 dataframe=df,
-                index=self._get_table_index(table_meta),
+                index=index_col,
                 time_index=table_meta.time_column
             )
-        
+
         # Add target dataframe as __target__ table
         target_df_copy = target_dataframe.copy()
         if target_index not in target_df_copy.columns:
             # Re-create the index column if it was synthetic
             target_df_copy[target_index] = self._determine_target_index(target_df_copy, {})
-        
+
         builder.add_dataframe(
-            dataframe_name="__target__", 
+            dataframe_name="__target__",
             dataframe=target_df_copy,
             index=target_index,
             time_index=cutoff_time_column
         )
-        
+
         builder.index_name = target_index
         builder.index = target_df_copy[target_index].values
-        
+
         # Set up cutoff time information
         if cutoff_time_column:
             cutoff_time = target_df_copy[[target_index, cutoff_time_column]].copy()
             cutoff_time.columns = [target_index, "time"]
             builder.set_cutoff_time(cutoff_time)
-    
+
     def _get_table_index(self, table_meta) -> str:
         """Get the primary key column for a table."""
         for col_schema in table_meta.columns:
