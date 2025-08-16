@@ -36,9 +36,6 @@ class DFS2SQLEngine(DFSEngine):
     ) -> pd.DataFrame:
         """Compute feature values using SQL generation (reuse existing computation logic)."""
         
-        # Apply DFS2SQL-specific feature filtering
-        filtered_features = self._filter_nested_array_agg_features(features)
-        
         # Set up database with RDB tables + target table
         target_index = self._determine_target_index(target_dataframe, key_mappings)
         builder = DuckDBBuilder(Path(config.engine_path))
@@ -48,7 +45,7 @@ class DFS2SQLEngine(DFSEngine):
         # Generate SQLs from feature specifications (reuse existing features2sql logic)
         has_cutoff_time = config.use_cutoff_time and cutoff_time_column is not None
         sqls = features2sql(
-            filtered_features,
+            features,
             target_index,
             has_cutoff_time=has_cutoff_time,
             cutoff_time_table_name="__target__",
@@ -69,7 +66,6 @@ class DFS2SQLEngine(DFSEngine):
                 if cutoff_time_column and cutoff_time_column in dataframe.columns:
                     dataframe.drop(columns=[cutoff_time_column], inplace=True)
                 dataframe.rename(decode_column_from_sql, axis="columns", inplace=True)
-                self._handle_array_aggregation(dataframe)
                 dataframes.append(dataframe)
         
         # Merge all feature dataframes
@@ -100,10 +96,6 @@ class DFS2SQLEngine(DFSEngine):
             return result
         else:
             return target_dataframe.copy()
-    
-    def _filter_nested_array_agg_features(self, features: List[ft.FeatureBase]) -> List[ft.FeatureBase]:
-        """No array filtering needed in simplified version."""
-        return features
     
     def _build_database_tables(
         self, 
@@ -157,7 +149,3 @@ class DFS2SQLEngine(DFSEngine):
                 return col_schema.name
         # If no primary key, create default index
         return "__index__"
-    
-    def _handle_array_aggregation(self, df: pd.DataFrame):
-        """No array aggregation handling needed in simplified version."""
-        pass
