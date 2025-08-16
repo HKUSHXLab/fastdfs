@@ -12,3 +12,13 @@ def save_pyd(pyd_model : pydantic.BaseModel, path : Path):
 def load_pyd(pyd_model_class, path : Path) -> pydantic.BaseModel:
     with open(path, "r") as f:
         return pyd_model_class.parse_obj(yaml.safe_load(f))
+
+def save_yaml(data_dict: dict, path: Path):
+    """Save a dictionary as YAML file."""
+    with open(path, "w") as f:
+        f.write(yaml.dump(data_dict))
+
+def load_yaml(path: Path) -> dict:
+    """Load YAML file as dictionary."""
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
