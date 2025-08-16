@@ -1,7 +1,7 @@
 """
 New DFS Engine Interface for table-centric feature engineering.
 
-This module implements the new DFS engine interface that works with external 
+This module implements the new DFS engine interface that works with external
 target dataframes and simplified RDB datasets, removing the dependency on tasks.
 """
 
@@ -17,7 +17,6 @@ from pathlib import Path
 from ..dataset.rdb_simplified import RDBDataset
 from ..dataset.meta import DBBColumnDType, DBBColumnSchema
 from ..preprocess.dfs.core import parse_one_column, base_feature_is_key
-from ..preprocess.dfs.primitives import Concat, Join, ArrayMax, ArrayMin, ArrayMean
 
 __all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine']
 
@@ -25,18 +24,18 @@ __all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine']
 class DFSConfig(pydantic.BaseModel):
     """
     Configuration model for Deep Feature Synthesis parameters.
-    
+
     This class defines all the configurable parameters for the DFS process,
     including aggregation primitives, depth limits, and engine selection.
-    
+
     Attributes:
         agg_primitives: List of aggregation primitive names to use
-        max_depth: Maximum depth for feature generation  
+        max_depth: Maximum depth for feature generation
         use_cutoff_time: Whether to use temporal cutoff times
         engine: Name of the DFS engine to use for computation
         engine_path: Optional path for engine-specific configuration
         trans_primitives: List of transformation primitives to use
-        where_primitives: List of where primitives to use  
+        where_primitives: List of where primitives to use
         max_features: Maximum number of features to generate
         include_entities: List of entities to include in feature generation
         ignore_entities: List of entities to ignore in feature generation
@@ -45,15 +44,11 @@ class DFSConfig(pydantic.BaseModel):
     """
     agg_primitives: List[str] = [
         "max",
-        "min", 
+        "min",
         "mean",
+        "std",
         "count",
         "mode",
-        "concat",
-        "join",
-        "arraymax",
-        "arraymin",
-        "arraymean",
     ]
     max_depth: int = 2
     use_cutoff_time: bool = True
@@ -70,10 +65,10 @@ class DFSConfig(pydantic.BaseModel):
 
 class DFSEngine:
     """Base class for DFS computation engines."""
-    
+
     def __init__(self, config: DFSConfig):
         self.config = config
-    
+
     def compute_features(
         self,
         rdb: RDBDataset,
@@ -84,7 +79,7 @@ class DFSEngine:
     ) -> pd.DataFrame:
         """
         Compute DFS features for a target dataframe using RDB context.
-        
+
         Args:
             rdb: The relational database providing context for feature generation
             target_dataframe: DataFrame to augment with features (doesn't need to exist in RDB)
@@ -92,7 +87,7 @@ class DFSEngine:
                          e.g., {"user_id": "user.user_id", "item_id": "item.item_id"}
             cutoff_time_column: Column name in target_dataframe for temporal cutoff (optional)
             config_overrides: Dictionary of config parameters to override for this computation
-            
+
         Returns:
             DataFrame with original target_dataframe data plus generated features
         """
@@ -102,11 +97,11 @@ class DFSEngine:
             for key, value in config_overrides.items():
                 if hasattr(effective_config, key):
                     setattr(effective_config, key, value)
-        
+
         return self._compute_features_impl(
             rdb, target_dataframe, key_mappings, cutoff_time_column, effective_config
         )
-    
+
     def _compute_features_impl(
         self,
         rdb: RDBDataset,
@@ -116,24 +111,30 @@ class DFSEngine:
         config: DFSConfig
     ) -> pd.DataFrame:
         """Implementation-specific feature computation."""
-        
+
         # Handle empty target dataframe
         if len(target_dataframe) == 0:
             return target_dataframe.copy()
-        
+
         # Phase 1: Feature preparation (common logic in base class)
         features = self.prepare_features(rdb, target_dataframe, key_mappings, cutoff_time_column, config)
-        
+
         if len(features) == 0:
-            raise RuntimeError("No features to compute, try to increase the depth.")
-        
+            logger.warning("No features generated, check your configuration or data.")
+            return target_dataframe
+
         # Phase 2: Feature computation (engine-specific logic in subclasses)
         feature_matrix = self.compute_feature_matrix(
             rdb, target_dataframe, key_mappings, cutoff_time_column, features, config
         )
-        
+
+        # Remove the temporary index column if it was added
+        target_index = self._determine_target_index(target_dataframe.copy(), key_mappings)
+        if target_index == "__target_index__" and target_index in feature_matrix.columns:
+            feature_matrix = feature_matrix.drop(columns=[target_index])
+
         return feature_matrix
-    
+
     def prepare_features(
         self,
         rdb: RDBDataset,
@@ -144,47 +145,46 @@ class DFSEngine:
     ) -> List[ft.FeatureBase]:
         """
         Prepare feature specifications using featuretools DFS.
-        
+
         This method builds the EntitySet, runs featuretools DFS to generate
         feature specifications, and filters the results based on configuration.
         This is common logic shared by all engines.
-        
+
         Returns:
             List of featuretools FeatureBase objects representing features to compute
         """
         # Build EntitySet from RDB tables
         entity_set = self._build_entity_set_from_rdb(rdb)
-        
-        # Add target dataframe as temporary entity  
+
+        # Add target dataframe as temporary entity
         target_entity_name = "__target__"
         target_index = self._determine_target_index(target_dataframe, key_mappings)
-        
+
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
             dataframe=target_dataframe.copy(),
             index=target_index,
             time_index=cutoff_time_column
         )
-        
+
         # Add relationships from target to RDB entities
         self._add_target_relationships(entity_set, target_entity_name, key_mappings)
-        
+
         logger.debug(entity_set)
-        
+
         # Convert primitive names to objects
         agg_primitives = self._convert_primitives(config.agg_primitives)
-        trans_primitives = self._convert_primitives(config.trans_primitives)
-        
+
         # Generate feature specifications using featuretools
         dfs_kwargs = {
             'entityset': entity_set,
             'target_dataframe_name': target_entity_name,
             'max_depth': config.max_depth,
             'agg_primitives': agg_primitives,
-            'trans_primitives': trans_primitives,
+            'trans_primitives': config.trans_primitives,
             'features_only': True
         }
-        
+
         # Add optional parameters if specified
         if config.max_features > 0:
             dfs_kwargs['max_features'] = config.max_features
@@ -192,46 +192,46 @@ class DFSEngine:
             dfs_kwargs['include_entities'] = config.include_entities
         if config.ignore_entities:
             dfs_kwargs['ignore_entities'] = config.ignore_entities
-        
+
         features = ft.dfs(**dfs_kwargs)
-        
+
         # Filter features based on configuration
         filtered_features = self._filter_features(features, entity_set, target_entity_name, config)
-        
+
         return filtered_features
-    
+
     def _build_entity_set_from_rdb(self, rdb: RDBDataset) -> ft.EntitySet:
         """Build EntitySet from RDB tables only (adapted from existing build_dataframes logic)."""
-        
+
         entity_set = ft.EntitySet(id=rdb.metadata.dataset_name)
-        
+
         # Add all RDB tables as entities
         for table_name in rdb.table_names:
             df = rdb.get_table(table_name)
             table_meta = rdb.get_table_metadata(table_name)
-            
+
             # Parse columns and build logical types/semantic tags (reuse existing logic)
             logical_types = {}
             semantic_tags = {}
             index_col = None
-            
+
             for col_schema in table_meta.columns:
                 col_name = col_schema.name
                 col_data = df[col_name].values
                 series, log_ty, tag = parse_one_column(col_schema, col_data)
                 logical_types[col_name] = log_ty
-                
+
                 if col_schema.dtype == DBBColumnDType.primary_key:
                     index_col = col_name
                     # Don't set semantic tag for index
                 else:
                     semantic_tags[col_name] = tag
-            
+
             # Add default index if needed
             if index_col is None:
                 df["__index__"] = np.arange(len(df))
                 index_col = "__index__"
-            
+
             entity_set = entity_set.add_dataframe(
                 dataframe_name=table_name,
                 dataframe=df,
@@ -240,7 +240,7 @@ class DFSEngine:
                 logical_types=logical_types,
                 semantic_tags=semantic_tags
             )
-        
+
         # Add relationships between RDB tables
         for child_table, child_col, parent_table, parent_col in rdb.get_relationships():
             entity_set = entity_set.add_relationship(
@@ -249,96 +249,74 @@ class DFSEngine:
                 child_dataframe_name=child_table,
                 child_column_name=child_col
             )
-        
+
         return entity_set
-    
+
     def _determine_target_index(self, target_df: pd.DataFrame, key_mappings: Dict[str, str]) -> str:
         """Determine appropriate index for target dataframe."""
-        
-        # If single key mapping, use that as index
-        if len(key_mappings) == 1:
-            return list(key_mappings.keys())[0]
-        
-        # If multiple keys, create composite index
-        key_cols = list(key_mappings.keys())
-        composite_index = "_".join(key_cols) + "_index"
-        
-        # Check if composite index already exists
-        if composite_index not in target_df.columns:
-            # Create composite index column
-            target_df[composite_index] = target_df[key_cols].apply(
-                lambda row: "_".join(row.astype(str)), axis=1
-            )
-        
-        return composite_index
-    
+        # Use a simple default index for all cases
+        index_col = "__target_index__"
+        if index_col not in target_df.columns:
+            target_df[index_col] = range(len(target_df))
+        return index_col
+
     def _add_target_relationships(
         self, entity_set: ft.EntitySet, target_entity_name: str, key_mappings: Dict[str, str]
     ):
         """Add relationships from target entity to RDB entities."""
-        
+
         for target_col, rdb_ref in key_mappings.items():
             parent_table, parent_col = rdb_ref.split('.')
-            
+
             entity_set = entity_set.add_relationship(
                 parent_dataframe_name=parent_table,
                 parent_column_name=parent_col,
                 child_dataframe_name=target_entity_name,
                 child_column_name=target_col
             )
-    
+
     def _convert_primitives(self, primitive_names: List[str]) -> List:
-        """Convert primitive names to primitive objects (reuse existing logic)."""
+        """Convert primitive names to primitive objects (simplified, no array primitives)."""
         primitives = []
         for prim in primitive_names:
-            if prim == "concat":
-                primitives.append(Concat)
-            elif prim == "join":
-                primitives.append(Join)
-            elif prim == "arraymax":
-                primitives.append(ArrayMax)
-            elif prim == "arraymin":
-                primitives.append(ArrayMin)
-            elif prim == "arraymean":
-                primitives.append(ArrayMean)
-            else:
-                primitives.append(prim)
+            # Only support basic primitives, no array types
+            primitives.append(prim)
         return primitives
-    
+
     def _filter_features(
-        self, 
-        features: List[ft.FeatureBase], 
-        entity_set: ft.EntitySet, 
+        self,
+        features: List[ft.FeatureBase],
+        entity_set: ft.EntitySet,
         target_entity_name: str,
         config: DFSConfig
     ) -> List[ft.FeatureBase]:
         """Filter features (adapted from existing filter_features logic)."""
-        
+
         if len(features) == 0:
             return features
-        
+
         # Get foreign/primary keys from relationships
         keys = set()
         for rel in entity_set.relationships:
             keys.add((rel.parent_name, rel.parent_column.name))
             keys.add((rel.child_name, rel.child_column.name))
-        
+
         new_features = []
         for feat in features:
             feat_str = str(feat)
-            
+
             # Remove features involving the target table
             if target_entity_name in feat_str:
                 continue
-                
+
             # Remove key-based features
             if base_feature_is_key(feat, keys):
                 continue
-                
+
             new_features.append(feat)
-            
+
         return new_features
-    
+
     @abc.abstractmethod
     def compute_feature_matrix(
         self,
@@ -351,7 +329,7 @@ class DFSEngine:
     ) -> pd.DataFrame:
         """
         Compute actual feature values from feature specifications.
-        
+
         This is engine-specific logic implemented by subclasses.
         """
         pass

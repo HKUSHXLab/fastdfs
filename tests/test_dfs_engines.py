@@ -7,31 +7,23 @@ for external target dataframes using the simplified RDB dataset interface.
 
 import pytest
 import pandas as pd
-import tempfile
 import numpy as np
 from pathlib import Path
 
 from fastdfs.dfs import DFSConfig, get_dfs_engine, FeaturetoolsEngine, DFS2SQLEngine
-from fastdfs.dataset.rdb_simplified import RDBDataset, convert_task_dataset_to_rdb
+from fastdfs.dataset.rdb_simplified import RDBDataset
 from fastdfs.api_new import load_rdb, compute_dfs_features, DFSPipeline
 
 
 @pytest.fixture
 def test_data_path():
-    """Path to existing test dataset."""
-    return Path(__file__).parent / "data" / "test_rdb"
+    """Path to new RDB test dataset."""
+    return Path(__file__).parent / "data" / "test_rdb_new"
 
 @pytest.fixture 
 def rdb_dataset(test_data_path):
-    """Create RDB dataset from existing test data."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        rdb_path = Path(temp_dir) / "rdb"
-        
-        # Convert task-based dataset to RDB-only format
-        convert_task_dataset_to_rdb(test_data_path, rdb_path)
-        
-        # Load the converted RDB dataset
-        yield RDBDataset(rdb_path)
+    """Load RDB dataset directly from new test data."""
+    return RDBDataset(test_data_path)
 
 @pytest.fixture
 def target_dataframe(rdb_dataset):
@@ -221,13 +213,9 @@ class TestHighLevelAPI:
     
     def test_load_rdb(self, test_data_path):
         """Test loading RDB using high-level API."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            rdb_path = Path(temp_dir) / "rdb"
-            convert_task_dataset_to_rdb(test_data_path, rdb_path)
-            
-            rdb = load_rdb(str(rdb_path))
-            assert isinstance(rdb, RDBDataset)
-            assert len(rdb.table_names) == 3
+        rdb = load_rdb(str(test_data_path))
+        assert isinstance(rdb, RDBDataset)
+        assert len(rdb.table_names) == 3
     
     def test_compute_dfs_features_default_config(self, rdb_dataset, target_dataframe, key_mappings):
         """Test computing features with default configuration."""

@@ -73,10 +73,14 @@ class FeaturetoolsEngine(DFSEngine):
         if target_index in feature_matrix.index.names or target_index == feature_matrix.index.name:
             # Reset index to get target_index as a column
             feature_matrix = feature_matrix.reset_index()
-        
-        # Convert feature matrix index to reset it properly
-        if feature_matrix.index.name != target_index:
-            feature_matrix = feature_matrix.reset_index()
+        elif feature_matrix.index.name is not None and feature_matrix.index.name != target_index:
+            # Reset index but drop the unwanted index column
+            feature_matrix = feature_matrix.reset_index(drop=True)
+            # Add the target index column back
+            feature_matrix[target_index] = range(len(feature_matrix))
+        elif target_index not in feature_matrix.columns:
+            # Add the target index column
+            feature_matrix[target_index] = range(len(feature_matrix))
         
         # Merge with original target dataframe to preserve original columns and order
         original_target_with_index = target_dataframe.copy()
@@ -86,9 +90,9 @@ class FeaturetoolsEngine(DFSEngine):
         
         # Ensure index columns have compatible types for merging
         if target_index in feature_matrix.columns and target_index in original_target_with_index.columns:
-            # Convert both to string for consistent merging
-            feature_matrix[target_index] = feature_matrix[target_index].astype(str)
-            original_target_with_index[target_index] = original_target_with_index[target_index].astype(str)
+            # Convert both to integer for consistent merging (since we use range index)
+            feature_matrix[target_index] = feature_matrix[target_index].astype(int)
+            original_target_with_index[target_index] = original_target_with_index[target_index].astype(int)
         
         # Merge to get original columns + new features
         result = pd.merge(
@@ -98,8 +102,6 @@ class FeaturetoolsEngine(DFSEngine):
             how='left'
         )
         
-        # Remove the synthetic index column if it was added
-        if len(key_mappings) > 1 and "_index" in target_index:
-            result = result.drop(columns=[target_index])
+        result = result.drop(columns=[target_index])
         
         return result

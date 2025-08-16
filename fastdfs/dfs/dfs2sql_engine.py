@@ -15,57 +15,8 @@ from .base_engine import DFSEngine, DFSConfig, dfs_engine
 from ..dataset.rdb_simplified import RDBDataset
 from ..preprocess.dfs.gen_sqls import features2sql, decode_column_from_sql
 from ..preprocess.dfs.database import DuckDBBuilder
-import numpy as np
 
 __all__ = ['DFS2SQLEngine']
-
-
-def _check_array_agg_occurrences(col_name, array_agg_func_names) -> int:
-    """Count occurrences of array aggregation function names in column name."""
-    arr_agg_counts = 0
-    for func_name in array_agg_func_names:
-        arr_agg_counts += col_name.count(func_name)
-    return arr_agg_counts
-
-
-def _nanstack(arr_list: List) -> np.ndarray:
-    """Stack a list of numpy ndarrays that may contain NaN."""
-    if arr_list is None:
-        return np.nan  # all values are NaN
-    arr_len = None
-    for arr in arr_list:
-        if isinstance(arr, list):
-            arr_len = len(arr)
-            break
-    if arr_len is None:
-        return np.nan  # all values are NaN
-    fill_val = np.zeros(arr_len)
-    new_arr_list = [arr if isinstance(arr, list) else fill_val for arr in arr_list]
-    return np.stack(new_arr_list)
-
-
-def array_max(column):
-    """Apply max aggregation to array column."""
-    if not isinstance(column, list):
-        return np.nan
-    stack = _nanstack(column)
-    return stack.max(0) if isinstance(stack, np.ndarray) else np.nan
-
-
-def array_min(column):
-    """Apply min aggregation to array column."""
-    if not isinstance(column, list):
-        return np.nan
-    stack = _nanstack(column)
-    return stack.min(0) if isinstance(stack, np.ndarray) else np.nan
-
-
-def array_mean(column):
-    """Apply mean aggregation to array column."""
-    if not isinstance(column, list):
-        return np.nan
-    stack = _nanstack(column)
-    return stack.mean(0) if isinstance(stack, np.ndarray) else np.nan
 
 
 @dfs_engine  
@@ -151,20 +102,8 @@ class DFS2SQLEngine(DFSEngine):
             return target_dataframe.copy()
     
     def _filter_nested_array_agg_features(self, features: List[ft.FeatureBase]) -> List[ft.FeatureBase]:
-        """Filter nested array aggregation features (reuse existing logic)."""
-        if len(features) == 0:
-            return features
-            
-        array_agg_func_names = ["ARRAYMAX", "ARRAYMIN", "ARRAYMEAN"]
-        new_features = []
-        for feat in features:
-            feat_str = str(feat)
-            agg_count = _check_array_agg_occurrences(feat_str, array_agg_func_names)
-            if agg_count > 1:
-                # Remove features with nested array aggregation
-                continue
-            new_features.append(feat)
-        return new_features
+        """No array filtering needed in simplified version."""
+        return features
     
     def _build_database_tables(
         self, 
@@ -220,14 +159,5 @@ class DFS2SQLEngine(DFSEngine):
         return "__index__"
     
     def _handle_array_aggregation(self, df: pd.DataFrame):
-        """Handle array aggregation results (reuse existing logic)."""
-        array_agg_func_names = ["ARRAYMAX", "ARRAYMIN", "ARRAYMEAN"]
-        for col in df.columns:
-            num_array_agg = _check_array_agg_occurrences(col, array_agg_func_names)
-            if num_array_agg == 1:
-                if "ARRAYMAX" in col:
-                    df[col] = df[col].apply(array_max)
-                elif "ARRAYMIN" in col:
-                    df[col] = df[col].apply(array_min)
-                elif "ARRAYMEAN" in col:
-                    df[col] = df[col].apply(array_mean)
+        """No array aggregation handling needed in simplified version."""
+        pass
