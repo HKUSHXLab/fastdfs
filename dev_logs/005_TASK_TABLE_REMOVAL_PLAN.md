@@ -157,6 +157,9 @@ class RDBDataset:
     def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDBDataset':
         """Create new RDBDataset with updated tables (for transforms)."""
         
+    def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDBDataset':
+        """Create new RDBDataset with updated tables and metadata (for transforms that modify schemas)."""
+        
     @property
     def sqlalchemy_metadata(self) -> sqlalchemy.MetaData:
         """Get SQLAlchemy metadata for the RDB."""
@@ -268,8 +271,19 @@ class RDBTransform:
 class TableTransform:
     """Transform that operates on individual tables within an RDB."""
     
-    def __call__(self, table: pd.DataFrame, table_metadata: RDBTableSchema) -> pd.DataFrame:
-        """Apply transformation to a single table."""
+    def __call__(self, table: pd.DataFrame, table_metadata: RDBTableSchema) -> Tuple[pd.DataFrame, RDBTableSchema]:
+        """
+        Apply transformation to a single table.
+        
+        Returns:
+            Tuple of (transformed_dataframe, updated_table_metadata)
+            
+        Expected Behavior:
+        - For unchanged tables: return (original_table, original_metadata)
+        - For modified tables: return (modified_table, updated_metadata with changed column schemas)
+        - For tables with new columns: return (table_with_new_cols, metadata with additional column schemas)
+        - For tables with removed columns: return (table_without_cols, metadata with removed column schemas)
+        """
         pass
 
 class ColumnTransform:
@@ -279,10 +293,18 @@ class ColumnTransform:
         """Check if this transform should be applied to a column."""
         pass
     
-    def __call__(self, column: pd.Series, column_metadata: DBBColumnSchema) -> pd.DataFrame:
+    def __call__(self, column: pd.Series, column_metadata: DBBColumnSchema) -> Tuple[pd.DataFrame, List[DBBColumnSchema]]:
         """
         Transform a column, potentially outputting multiple new columns.
-        Returns DataFrame with new columns to add/replace.
+        
+        Returns:
+            Tuple of (dataframe_with_new_columns, list_of_new_column_schemas)
+            
+        Expected Behavior:
+        - For unchanged columns: return (df_with_original_column, [original_column_schema])
+        - For modified columns: return (df_with_modified_column, [updated_column_schema])
+        - For columns generating new features: return (df_with_multiple_columns, [schema_for_each_new_column])
+        - For removed columns: should consider using TableTransform instead
         """
         pass
 
@@ -299,7 +321,6 @@ class RDBTransformPipeline:
             result = transform(result)
         return result
 
-# Wrapper to apply table/column transforms to RDB
 class RDBTransformWrapper(RDBTransform):
     """Wrapper to apply TableTransform or ColumnTransform to entire RDB."""
     
@@ -309,34 +330,49 @@ class RDBTransformWrapper(RDBTransform):
     def __call__(self, rdb: RDBDataset) -> RDBDataset:
         """Apply inner transform to all applicable tables/columns in RDB."""
         new_tables = {}
+        updated_metadata = {}
         
         for table_name, table_df in rdb.tables.items():
             table_metadata = rdb.get_table_metadata(table_name)
             
             if isinstance(self.inner_transform, TableTransform):
                 # Apply to entire table
-                new_tables[table_name] = self.inner_transform(table_df, table_metadata)
+                new_table, new_table_metadata = self.inner_transform(table_df, table_metadata)
+                new_tables[table_name] = new_table
+                updated_metadata[table_name] = new_table_metadata
                 
             elif isinstance(self.inner_transform, ColumnTransform):
                 # Apply to applicable columns
                 new_table = table_df.copy()
+                new_column_schemas = []
                 
                 for col_schema in table_metadata.columns:
                     if self.inner_transform.applies_to(col_schema):
                         col_name = col_schema.name
-                        new_cols_df = self.inner_transform(table_df[col_name], col_schema)
+                        new_cols_df, new_col_schemas = self.inner_transform(table_df[col_name], col_schema)
                         
-                        # Replace/add columns from transform result
+                        # Add/replace columns from transform result
                         for new_col_name, new_col_data in new_cols_df.items():
                             new_table[new_col_name] = new_col_data
                         
-                        # Optionally remove original column if transform replaces it
+                        # Update column schemas
+                        new_column_schemas.extend(new_col_schemas)
+                        
+                        # Remove original column if transform doesn't retain it
                         if hasattr(self.inner_transform, 'replaces_original') and self.inner_transform.replaces_original:
                             new_table = new_table.drop(columns=[col_name])
+                    else:
+                        # Keep original column and schema if transform doesn't apply
+                        new_column_schemas.append(col_schema)
                 
                 new_tables[table_name] = new_table
+                updated_metadata[table_name] = RDBTableSchema(
+                    name=table_metadata.name,
+                    columns=new_column_schemas,
+                    **{k: v for k, v in table_metadata.__dict__.items() if k not in ['name', 'columns']}
+                )
         
-        return rdb.create_new_with_tables(new_tables)
+        return rdb.create_new_with_tables_and_metadata(new_tables, updated_metadata)
 ```
 
 ### 4. High-Level API
@@ -387,9 +423,9 @@ augmented_df = fastdfs.compute_dfs_features(
 
 # Apply transforms to RDB (simplified - no fit/transform)
 transform_pipeline = fastdfs.RDBTransformPipeline([
-    fastdfs.transforms.CanonicalizeNumeric(),
     fastdfs.transforms.FeaturizeDatetime(methods=["year", "month", "hour"]),
-    fastdfs.transforms.NormalizeNumeric()
+    fastdfs.transforms.FilterColumn(drop_redundant=True),
+    fastdfs.transforms.HandleDummyTable()
 ])
 transformed_rdb = transform_pipeline(rdb)
 
@@ -443,15 +479,15 @@ prediction_features = fastdfs.compute_dfs_features(
 
 **Workaround**: Users must handle train/val/test parameter learning externally:
 ```python
-# Old approach (automatic)
-transform = NormalizeNumeric()
-transform.fit(train_rdb)  # Learn mean/std from training only
-test_rdb = transform.transform(test_rdb)  # Apply learned params
+# Old approach (automatic with normalization)
+transform = FilterColumn(drop_redundant=True)
+transform.fit(train_rdb)  # Learn which columns to drop from training only
+test_rdb = transform.transform(test_rdb)  # Apply learned filtering
 
 # New approach (manual)
-train_stats = compute_normalization_stats(train_df)
-normalize_transform = NormalizeNumeric(mean=train_stats.mean, std=train_stats.std)
-test_rdb = normalize_transform(test_rdb)
+train_stats = compute_column_statistics(train_df)
+filter_transform = FilterColumn(drop_dtypes=train_stats.redundant_dtypes)
+test_rdb = filter_transform(test_rdb)
 ```
 
 #### 2. **Automatic Train/Val/Test Split Handling**
@@ -558,9 +594,9 @@ result = transform(data)
 #### 3. **Composability**: Easy to chain and combine operations
 ```python
 pipeline = RDBTransformPipeline([
-    CanonicalizeNumeric(),
     FeaturizeDatetime(methods=["year", "month"]),
-    NormalizeNumeric(method="robust")
+    FilterColumn(drop_redundant=True),
+    HandleDummyTable()
 ])
 result = pipeline(rdb)
 ```
@@ -1250,109 +1286,200 @@ class DFS2SQLEngine(DFSEngine):
 
 #### 3.1 RDB Transform Base Classes
 
+Refer to the High-level API section above for the core interface design of `RDBTransform`, `TableTransform`, and `ColumnTransform` classes.
+
+For the first version, we will implement these three key transforms as examples:
+
+**FeaturizeDatetime (ColumnTransform)**
+Based on `fastdfs/preprocess/transform/datetime.py`, this transform:
+- Applies to columns with `DBBColumnDType.datetime_t`
+- Extracts features like year, month, day, dayofweek, timestamp from datetime columns
+- Creates new columns with names like `{original_column}_year`, `{original_column}_month`, etc.
+- Can optionally retain or replace the original column
+- Returns updated column schemas with appropriate data types (category for year/month/day, float for timestamp)
+
+**FilterColumn (TableTransform)** 
+Based on `fastdfs/preprocess/transform/filter_column.py`, this transform:
+- Operates on entire tables to remove redundant or unwanted columns
+- Removes columns with only identical values (redundant columns)
+- Can remove columns based on specified data types
+- Preserves primary key and foreign key columns
+- Returns updated table metadata with removed column schemas
+
+**HandleDummyTable (RDBTransform)**
+Based on `fastdfs/preprocess/transform/dummy_table.py`, this transform:
+- Creates dummy tables that are referenced by foreign keys but don't exist in the RDB
+- Examines relationship metadata to find missing primary key tables
+- Creates new tables with unique primary key values extracted from foreign key references
+- Adds these dummy tables to the RDB with appropriate primary key column metadata
+- Essential for DFS when relationships reference tables that only exist implicitly
+
 ```python
 # fastdfs/transform/base.py (updated)
+from collections import defaultdict
+from loguru import logger
+import pandas as pd
+from typing import List, Dict, Optional, Tuple
 
-class RDBTransform:
-    """Base class for RDB transformations - simplified functional interface."""
-    
-    def __call__(self, rdb: RDBDataset) -> RDBDataset:
-        """
-        Apply transformation to RDB and return new RDB.
-        Pure function: RDB -> RDB
-        """
-        pass
-
-# Example transform implementations
-class CanonicalizeNumeric(RDBTransform):
-    """Convert all numeric columns to standard float64 format."""
-    
-    def __call__(self, rdb: RDBDataset) -> RDBDataset:
-        new_tables = {}
-        
-        for table_name, table_df in rdb.tables.items():
-            new_table = table_df.copy()
-            table_meta = rdb.get_table_metadata(table_name)
-            
-            for col_schema in table_meta.columns:
-                if col_schema.dtype == DBBColumnDType.float_t:
-                    col_name = col_schema.name
-                    # Convert to standard format
-                    new_table[col_name] = pd.to_numeric(new_table[col_name], errors='coerce').astype('float64')
-            
-            new_tables[table_name] = new_table
-        
-        return rdb.create_new_with_tables(new_tables)
-
-class FeaturizeDatetime(RDBTransform):
+class FeaturizeDatetime(ColumnTransform):
     """Extract datetime features from datetime columns."""
     
-    def __init__(self, methods: List[str] = ["year", "month", "day"]):
+    def __init__(self, methods: List[str] = ["year", "month", "day"], retain_original: bool = False):
         self.methods = methods
+        self.retain_original = retain_original
     
-    def __call__(self, rdb: RDBDataset) -> RDBDataset:
-        new_tables = {}
+    def applies_to(self, column_metadata: DBBColumnSchema) -> bool:
+        return column_metadata.dtype == DBBColumnDType.datetime_t
+    
+    def __call__(self, column: pd.Series, column_metadata: DBBColumnSchema) -> Tuple[pd.DataFrame, List[DBBColumnSchema]]:
+        """Transform datetime column into multiple feature columns."""
+        dt_series = pd.to_datetime(column)
+        result_df = pd.DataFrame()
+        new_schemas = []
         
-        for table_name, table_df in rdb.tables.items():
-            new_table = table_df.copy()
-            table_meta = rdb.get_table_metadata(table_name)
-            
-            for col_schema in table_meta.columns:
-                if col_schema.dtype == DBBColumnDType.datetime_t:
-                    col_name = col_schema.name
-                    dt_series = pd.to_datetime(new_table[col_name])
-                    
-                    # Extract datetime features
-                    if "year" in self.methods:
-                        new_table[f"{col_name}_year"] = dt_series.dt.year
-                    if "month" in self.methods:
-                        new_table[f"{col_name}_month"] = dt_series.dt.month
-                    if "day" in self.methods:
-                        new_table[f"{col_name}_day"] = dt_series.dt.day
-                    if "hour" in self.methods:
-                        new_table[f"{col_name}_hour"] = dt_series.dt.hour
-                    if "dayofweek" in self.methods:
-                        new_table[f"{col_name}_dayofweek"] = dt_series.dt.dayofweek
-            
-            new_tables[table_name] = new_table
+        # Extract datetime features
+        for method in self.methods:
+            if method == "year":
+                result_df[f"{column_metadata.name}_year"] = dt_series.dt.year
+                new_schemas.append(DBBColumnSchema(
+                    name=f"{column_metadata.name}_year", 
+                    dtype=DBBColumnDType.category_t
+                ))
+            elif method == "month":
+                result_df[f"{column_metadata.name}_month"] = dt_series.dt.month  
+                new_schemas.append(DBBColumnSchema(
+                    name=f"{column_metadata.name}_month",
+                    dtype=DBBColumnDType.category_t
+                ))
+            elif method == "day":
+                result_df[f"{column_metadata.name}_day"] = dt_series.dt.day
+                new_schemas.append(DBBColumnSchema(
+                    name=f"{column_metadata.name}_day",
+                    dtype=DBBColumnDType.category_t
+                ))
+            elif method == "dayofweek":
+                result_df[f"{column_metadata.name}_dayofweek"] = dt_series.dt.dayofweek
+                new_schemas.append(DBBColumnSchema(
+                    name=f"{column_metadata.name}_dayofweek",
+                    dtype=DBBColumnDType.category_t
+                ))
+            elif method == "hour":
+                result_df[f"{column_metadata.name}_hour"] = dt_series.dt.hour
+                new_schemas.append(DBBColumnSchema(
+                    name=f"{column_metadata.name}_hour",
+                    dtype=DBBColumnDType.category_t
+                ))
         
-        return rdb.create_new_with_tables(new_tables)
+        # Optionally retain original column
+        if self.retain_original:
+            result_df[column_metadata.name] = column
+            new_schemas.append(column_metadata)
+        elif column_metadata.metadata.get('is_time_column', False):
+            # Convert to timestamp for time columns
+            result_df[column_metadata.name] = dt_series.astype('int64') // 10**9  # Unix timestamp
+            timestamp_schema = DBBColumnSchema(
+                name=column_metadata.name,
+                dtype=DBBColumnDType.timestamp_t,
+                metadata={'is_time_column': True}
+            )
+            new_schemas.append(timestamp_schema)
+        
+        return result_df, new_schemas
 
-class NormalizeNumeric(RDBTransform):
-    """Normalize numeric columns using specified statistics."""
+class FilterColumn(TableTransform):
+    """Filter redundant and unwanted columns from tables."""
     
-    def __init__(self, method: str = "zscore", mean: Dict[str, float] = None, std: Dict[str, float] = None):
-        self.method = method
-        self.mean = mean or {}
-        self.std = std or {}
+    def __init__(self, drop_dtypes: Optional[List[str]] = None, drop_redundant: bool = True):
+        self.drop_dtypes = drop_dtypes or []
+        self.drop_redundant = drop_redundant
+    
+    def __call__(self, table: pd.DataFrame, table_metadata: RDBTableSchema) -> Tuple[pd.DataFrame, RDBTableSchema]:
+        """Remove redundant or unwanted columns from table."""
+        columns_to_drop = []
+        
+        for col_schema in table_metadata.columns:
+            col_name = col_schema.name
+            
+            # Never drop primary or foreign keys
+            if col_schema.dtype in [DBBColumnDType.primary_key, DBBColumnDType.foreign_key]:
+                continue
+                
+            # Skip vector embeddings (multi-dimensional data)
+            if col_name in table.columns and table[col_name].apply(lambda x: hasattr(x, '__len__') and len(x) > 1).any():
+                continue
+                
+            # Drop redundant columns (single unique value)
+            if self.drop_redundant and col_schema.dtype != DBBColumnDType.text_t:
+                if col_name in table.columns:
+                    unique_values = table[col_name].nunique(dropna=False)
+                    if unique_values <= 1:
+                        columns_to_drop.append(col_name)
+                        continue
+            
+            # Drop columns by data type
+            if col_schema.dtype in self.drop_dtypes:
+                columns_to_drop.append(col_name)
+        
+        # Create new table and metadata
+        new_table = table.drop(columns=columns_to_drop, errors='ignore')
+        new_column_schemas = [
+            col_schema for col_schema in table_metadata.columns 
+            if col_schema.name not in columns_to_drop
+        ]
+        
+        new_metadata = RDBTableSchema(
+            name=table_metadata.name,
+            columns=new_column_schemas,
+            **{k: v for k, v in table_metadata.__dict__.items() if k not in ['name', 'columns']}
+        )
+        
+        return new_table, new_metadata
+
+class HandleDummyTable(RDBTransform):
+    """Create dummy tables for foreign keys that reference non-existent tables."""
     
     def __call__(self, rdb: RDBDataset) -> RDBDataset:
-        new_tables = {}
-        
-        for table_name, table_df in rdb.tables.items():
-            new_table = table_df.copy()
-            table_meta = rdb.get_table_metadata(table_name)
+        """Add dummy tables to RDB for missing primary key tables."""
+        if not hasattr(rdb, 'relationships') or rdb.relationships is None:
+            return rdb
             
-            for col_schema in table_meta.columns:
-                if col_schema.dtype == DBBColumnDType.float_t:
-                    col_name = col_schema.name
-                    full_col_name = f"{table_name}.{col_name}"
-                    
-                    if self.method == "zscore":
-                        if full_col_name in self.mean and full_col_name in self.std:
-                            # Use provided statistics
-                            mean_val = self.mean[full_col_name]
-                            std_val = self.std[full_col_name]
-                        else:
-                            # Compute from current data
-                            mean_val = new_table[col_name].mean()
-                            std_val = new_table[col_name].std()
-                        
-                        new_table[col_name] = (new_table[col_name] - mean_val) / std_val
-            
-            new_tables[table_name] = new_table
+        # Group foreign keys by primary key table
+        pk_to_fk_list = defaultdict(list)
+        for fk_tbl, fk_col, pk_tbl, pk_col in rdb.relationships:
+            pk_to_fk_list[(pk_tbl, pk_col)].append((fk_tbl, fk_col))
         
-        return rdb.create_new_with_tables(new_tables)
+        new_tables = dict(rdb.tables)
+        new_metadata = dict(rdb.table_metadata) if hasattr(rdb, 'table_metadata') else {}
+        
+        for (pk_tbl, pk_col), fk_list in pk_to_fk_list.items():
+            # Check if primary key table exists
+            if pk_tbl not in rdb.tables:
+                # Collect all foreign key values that reference this missing table
+                all_fk_values = []
+                for fk_tbl, fk_col in fk_list:
+                    if fk_tbl in rdb.tables and fk_col in rdb.tables[fk_tbl].columns:
+                        all_fk_values.extend(rdb.tables[fk_tbl][fk_col].tolist())
+                
+                # Create dummy table with unique primary key values
+                unique_pk_values = pd.Series(all_fk_values).drop_duplicates().dropna()
+                dummy_table = pd.DataFrame({pk_col: unique_pk_values})
+                
+                # Create metadata for dummy table
+                pk_column_schema = DBBColumnSchema(
+                    name=pk_col,
+                    dtype=DBBColumnDType.primary_key
+                )
+                dummy_table_schema = RDBTableSchema(
+                    name=pk_tbl,
+                    columns=[pk_column_schema]
+                )
+                
+                new_tables[pk_tbl] = dummy_table
+                new_metadata[pk_tbl] = dummy_table_schema
+                
+                logger.info(f"Created dummy table '{pk_tbl}' with {len(unique_pk_values)} unique values for column '{pk_col}'")
+        
+        return rdb.create_new_with_tables_and_metadata(new_tables, new_metadata)
 
 # Pipeline for composing transforms
 class RDBTransformPipeline(RDBTransform):
@@ -1367,30 +1494,6 @@ class RDBTransformPipeline(RDBTransform):
         for transform in self.transforms:
             result = transform(result)
         return result
-
-# Utility functions for external parameter learning
-def compute_normalization_stats(dataframes: List[pd.DataFrame], numeric_columns: List[str]) -> Dict[str, Dict[str, float]]:
-    """Compute normalization statistics from training data."""
-    stats = {"mean": {}, "std": {}}
-    
-    # Combine all dataframes
-    combined_df = pd.concat(dataframes, ignore_index=True)
-    
-    for col in numeric_columns:
-        if col in combined_df.columns:
-            stats["mean"][col] = combined_df[col].mean()
-            stats["std"][col] = combined_df[col].std()
-    
-    return stats
-
-# Usage with external parameter learning:
-# train_stats = compute_normalization_stats([train_df], ["amount", "balance"])
-# normalize_transform = NormalizeNumeric(
-#     method="zscore", 
-#     mean=train_stats["mean"], 
-#     std=train_stats["std"]
-# )
-# test_rdb_normalized = normalize_transform(test_rdb)
 ```
 
 ### Phase 4: Updated CLI and API (Week 4)
@@ -1490,9 +1593,9 @@ features_df = fastdfs.compute_dfs_features(
 
 # Apply transforms (simplified - no fit/transform)
 transforms = fastdfs.RDBTransformPipeline([
-    fastdfs.transforms.CanonicalizeNumeric(),
     fastdfs.transforms.FeaturizeDatetime(methods=["year", "month", "hour"]), 
-    fastdfs.transforms.NormalizeNumeric()
+    fastdfs.transforms.FilterColumn(drop_redundant=True),
+    fastdfs.transforms.HandleDummyTable()
 ])
 transformed_rdb = transforms(rdb)
 
@@ -1677,9 +1780,9 @@ rdb = fastdfs.load_rdb("financial_rdb/")
 
 # Apply preprocessing transforms (simplified - no fit/transform)
 preprocessor = fastdfs.RDBTransformPipeline([
-    fastdfs.transforms.CanonicalizeDatetime(),
     fastdfs.transforms.FeaturizeDatetime(methods=["hour", "day_of_week", "month"]),
-    fastdfs.transforms.NormalizeAmounts()
+    fastdfs.transforms.FilterColumn(drop_redundant=True),
+    fastdfs.transforms.HandleDummyTable()
 ])
 clean_rdb = preprocessor(rdb)
 
