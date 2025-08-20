@@ -155,6 +155,35 @@ class RDBDataset:
         new_dataset.metadata = self.metadata
         new_dataset.tables = new_tables.copy()
         return new_dataset
+    
+    def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDBDataset':
+        """Create new RDBDataset with updated tables and metadata (for transforms that modify schemas)."""
+        # Create a new instance with updated metadata and table data
+        new_dataset = RDBDataset.__new__(RDBDataset)
+        new_dataset.path = self.path
+        new_dataset.tables = new_tables.copy()
+        
+        # Update metadata with new table schemas
+        updated_table_schemas = []
+        for table_schema in self.metadata.tables:
+            if table_schema.name in new_metadata:
+                updated_table_schemas.append(new_metadata[table_schema.name])
+            else:
+                updated_table_schemas.append(table_schema)
+        
+        # Add any completely new table schemas
+        existing_table_names = {schema.name for schema in self.metadata.tables}
+        for table_name, schema in new_metadata.items():
+            if table_name not in existing_table_names:
+                updated_table_schemas.append(schema)
+        
+        # Create new metadata object
+        new_dataset.metadata = RDBDatasetMeta(
+            dataset_name=self.metadata.dataset_name,
+            tables=updated_table_schemas
+        )
+        
+        return new_dataset
         
     @property
     def sqlalchemy_metadata(self) -> sqlalchemy.MetaData:
