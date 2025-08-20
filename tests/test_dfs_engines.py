@@ -46,6 +46,67 @@ def target_dataframe(rdb_dataset):
     })
 
 @pytest.fixture
+def cutoff_test_scenarios():
+    """
+    Create target dataframes with specific entities and hardcoded cutoff times
+    to test different temporal filtering scenarios.
+
+    Based on analysis of the test data:
+    - Test User (74253567...): 14 interactions at timestamps 00:00:00 and 00:01:00
+    - Test Item (fa9407df...): 14 interactions spread from 00:00:00 to 01:15:00
+    """
+    # These are actual entity IDs from the test dataset with known timestamp patterns
+    TEST_USER_ID = "74253567-a345-43ab-9ea1-502391f5d63b"
+    TEST_ITEM_ID = "fa9407df-1720-4652-a17c-94d7ded6ce60"
+
+    scenarios = {
+        # Cutoff before all interactions - should give 0 counts
+        'before_all': pd.DataFrame({
+            "user_id": [TEST_USER_ID],
+            "item_id": [TEST_ITEM_ID],
+            "cutoff_time": [pd.Timestamp("2022-12-31 23:00:00")]
+        }),
+
+        # Cutoff that includes some user interactions (4) and few item interactions (1)
+        'partial_interactions': pd.DataFrame({
+            "user_id": [TEST_USER_ID],
+            "item_id": [TEST_ITEM_ID],
+            "cutoff_time": [pd.Timestamp("2023-01-01 00:00:30")]
+        }),
+
+        # Cutoff that includes all user interactions (14) and some item interactions (7)
+        'middle_spread': pd.DataFrame({
+            "user_id": [TEST_USER_ID],
+            "item_id": [TEST_ITEM_ID],
+            "cutoff_time": [pd.Timestamp("2023-01-01 00:07:30")]
+        }),
+
+        # Cutoff that includes most interactions for both entities
+        'most_data': pd.DataFrame({
+            "user_id": [TEST_USER_ID],
+            "item_id": [TEST_ITEM_ID],
+            "cutoff_time": [pd.Timestamp("2023-01-01 00:43:30")]
+        }),
+
+        # Cutoff after all interactions - should include everything
+        'after_all': pd.DataFrame({
+            "user_id": [TEST_USER_ID],
+            "item_id": [TEST_ITEM_ID],
+            "cutoff_time": [pd.Timestamp("2023-01-01 02:00:00")]
+        }),
+
+        # Test exact timestamp boundary (at exactly 00:00:00)
+        # DFS should exclude interactions AT the cutoff time (strict less-than)
+        'exact_boundary': pd.DataFrame({
+            "user_id": [TEST_USER_ID],
+            "item_id": [TEST_ITEM_ID],
+            "cutoff_time": [pd.Timestamp("2023-01-01 00:00:00")]
+        })
+    }
+
+    return scenarios
+
+@pytest.fixture
 def key_mappings():
     """Key mappings for test target dataframe."""
     return {
@@ -425,3 +486,251 @@ class TestEdgeCases:
                 target_dataframe=target_dataframe,
                 key_mappings=invalid_mappings
             )
+
+
+class TestThoroughCutoffTimeScenarios:
+    """
+    Comprehensive test cases for cutoff time scenarios using hardcoded timestamps.
+    Tests the DFS algorithm's temporal filtering behavior with carefully crafted cutoff times.
+    """
+
+    def test_cutoff_before_all_interactions(self, rdb_dataset, cutoff_test_scenarios, key_mappings):
+        """Test cutoff time before all interaction timestamps."""
+        target_df = cutoff_test_scenarios['before_all']
+
+        print(f"Testing cutoff before all interactions: {target_df['cutoff_time'].iloc[0]}")
+
+        # Test with both engines
+        for engine_name in ['featuretools', 'dfs2sql']:
+            config = DFSConfig(
+                engine=engine_name,
+                max_depth=2,
+                agg_primitives=["count", "mean"],
+                use_cutoff_time=True
+            )
+            engine = get_dfs_engine(engine_name, config)
+
+            result_df = engine.compute_features(
+                rdb=rdb_dataset,
+                target_dataframe=target_df,
+                key_mappings=key_mappings,
+                cutoff_time_column="cutoff_time"
+            )
+
+            # All count features should be 0 since cutoff is before all interactions
+            count_features = [col for col in result_df.columns if 'COUNT' in col]
+            for feature in count_features:
+                values = result_df[feature].fillna(0)
+                assert all(v == 0 for v in values), f"Expected 0 counts for {feature} with cutoff before all interactions in {engine_name}"
+
+            print(f"✓ {engine_name}: Cutoff before all interactions correctly produces 0 counts")
+
+    def test_cutoff_after_all_interactions(self, rdb_dataset, cutoff_test_scenarios, key_mappings):
+        """Test cutoff time after all interaction timestamps."""
+        target_df = cutoff_test_scenarios['after_all']
+
+        print(f"Testing cutoff after all interactions: {target_df['cutoff_time'].iloc[0]}")
+
+        # Expected counts based on our analysis: User=14, Item=14
+        expected_user_count = 14
+        expected_item_count = 14
+
+        # Test with both engines
+        results = {}
+        for engine_name in ['featuretools', 'dfs2sql']:
+            config = DFSConfig(
+                engine=engine_name,
+                max_depth=2,
+                agg_primitives=["count", "mean"],
+                use_cutoff_time=True
+            )
+            engine = get_dfs_engine(engine_name, config)
+
+            result_df = engine.compute_features(
+                rdb=rdb_dataset,
+                target_dataframe=target_df,
+                key_mappings=key_mappings,
+                cutoff_time_column="cutoff_time"
+            )
+
+            results[engine_name] = result_df
+
+            # Check count features
+            user_count_col = [col for col in result_df.columns if 'user.COUNT' in col][0]
+            item_count_col = [col for col in result_df.columns if 'item.COUNT' in col][0]
+
+            actual_user_count = result_df[user_count_col].fillna(0).iloc[0]
+            actual_item_count = result_df[item_count_col].fillna(0).iloc[0]
+
+            print(f"{engine_name}: User count={actual_user_count}, Item count={actual_item_count}")
+
+            # Verify expected counts
+            assert actual_user_count == expected_user_count, f"{engine_name}: Expected user count {expected_user_count}, got {actual_user_count}"
+            assert actual_item_count == expected_item_count, f"{engine_name}: Expected item count {expected_item_count}, got {actual_item_count}"
+
+            print(f"✓ {engine_name}: Cutoff after all interactions includes all data correctly")
+
+        # Compare results between engines
+        self._compare_engine_results(results['featuretools'], results['dfs2sql'], target_df.columns)
+
+    def test_partial_cutoff_scenarios(self, rdb_dataset, cutoff_test_scenarios, key_mappings):
+        """Test cutoff times that include partial interaction data."""
+
+        # Test scenarios with expected counts based on our analysis
+        test_cases = [
+            ('partial_interactions', 4, 1),  # User=4, Item=1
+            ('middle_spread', 14, 7),        # User=14, Item=7
+            ('most_data', 14, 13)            # User=14, Item=13
+        ]
+
+        for scenario_name, expected_user_count, expected_item_count in test_cases:
+            target_df = cutoff_test_scenarios[scenario_name]
+            cutoff_time = target_df['cutoff_time'].iloc[0]
+
+            print(f"\nTesting {scenario_name} scenario: {cutoff_time}")
+            print(f"Expected: User={expected_user_count}, Item={expected_item_count}")
+
+            # Test with both engines
+            results = {}
+            for engine_name in ['featuretools', 'dfs2sql']:
+                config = DFSConfig(
+                    engine=engine_name,
+                    max_depth=2,
+                    agg_primitives=["count", "mean"],
+                    use_cutoff_time=True
+                )
+                engine = get_dfs_engine(engine_name, config)
+
+                result_df = engine.compute_features(
+                    rdb=rdb_dataset,
+                    target_dataframe=target_df,
+                    key_mappings=key_mappings,
+                    cutoff_time_column="cutoff_time"
+                )
+
+                results[engine_name] = result_df
+
+                # Check count features
+                user_count_col = [col for col in result_df.columns if 'user.COUNT' in col][0]
+                item_count_col = [col for col in result_df.columns if 'item.COUNT' in col][0]
+
+                actual_user_count = result_df[user_count_col].fillna(0).iloc[0]
+                actual_item_count = result_df[item_count_col].fillna(0).iloc[0]
+
+                print(f"  {engine_name}: User={actual_user_count}, Item={actual_item_count}")
+
+                # Verify expected counts
+                assert actual_user_count == expected_user_count, \
+                    f"{engine_name} {scenario_name}: Expected user count {expected_user_count}, got {actual_user_count}"
+                assert actual_item_count == expected_item_count, \
+                    f"{engine_name} {scenario_name}: Expected item count {expected_item_count}, got {actual_item_count}"
+
+            # Compare results between engines
+            self._compare_engine_results(results['featuretools'], results['dfs2sql'], target_df.columns)
+            print(f"✓ {scenario_name}: Both engines produce correct and consistent results")
+
+    def test_exact_timestamp_boundary(self, rdb_dataset, cutoff_test_scenarios, key_mappings):
+        """
+        Test cutoff exactly at an interaction timestamp.
+        DFS should exclude interactions AT the cutoff time (strict less-than).
+        This is the correct behavior - interactions at the exact cutoff time should not be included.
+        """
+        target_df = cutoff_test_scenarios['exact_boundary']
+        cutoff_time = target_df['cutoff_time'].iloc[0]  # 2023-01-01 00:00:00
+
+        print(f"Testing exact boundary at: {cutoff_time}")
+        print("DFS should use strict less-than, so interactions AT this timestamp should be excluded")
+
+        # Expected: 0 counts since cutoff should exclude interactions AT the cutoff time
+        expected_user_count = 0
+        expected_item_count = 0
+
+        # Test with both engines - expecting correct behavior (strict <)
+        results = {}
+        for engine_name in ['featuretools', 'dfs2sql']:
+            config = DFSConfig(
+                engine=engine_name,
+                max_depth=2,
+                agg_primitives=["count"],
+                use_cutoff_time=True
+            )
+            engine = get_dfs_engine(engine_name, config)
+
+            result_df = engine.compute_features(
+                rdb=rdb_dataset,
+                target_dataframe=target_df,
+                key_mappings=key_mappings,
+                cutoff_time_column="cutoff_time"
+            )
+
+            results[engine_name] = result_df
+
+            user_count_col = [col for col in result_df.columns if 'user.COUNT' in col][0]
+            item_count_col = [col for col in result_df.columns if 'item.COUNT' in col][0]
+
+            actual_user_count = result_df[user_count_col].fillna(0).iloc[0]
+            actual_item_count = result_df[item_count_col].fillna(0).iloc[0]
+
+            print(f"  {engine_name}: User={actual_user_count}, Item={actual_item_count}")
+
+            # Should equal 0 (strict less-than excludes interactions AT cutoff time)
+            assert actual_user_count == expected_user_count, \
+                f"{engine_name}: Expected {expected_user_count} (strict <), got {actual_user_count}"
+            assert actual_item_count == expected_item_count, \
+                f"{engine_name}: Expected {expected_item_count} (strict <), got {actual_item_count}"
+
+            print(f"✓ {engine_name}: Correctly excludes interactions AT cutoff timestamp")
+
+        # Compare results between engines - they should be identical
+        self._compare_engine_results(results['featuretools'], results['dfs2sql'], target_df.columns)
+
+    def test_engine_consistency_across_all_scenarios(self, rdb_dataset, cutoff_test_scenarios, key_mappings):
+        """Test that both engines produce identical results across all cutoff scenarios.
+        Note: Skips exact_boundary scenario due to known featuretools bug with cutoff time boundary handling.
+        """
+
+        # Skip exact_boundary due to known featuretools bug (uses <= instead of strict <)
+        scenarios_to_test = {k: v for k, v in cutoff_test_scenarios.items() if k != 'exact_boundary'}
+
+        for scenario_name, target_df in scenarios_to_test.items():
+            print(f"\nTesting engine consistency for: {scenario_name}")
+
+            # Get results from both engines
+            ft_config = DFSConfig(engine="featuretools", max_depth=2, agg_primitives=["count", "mean"], use_cutoff_time=True)
+            sql_config = DFSConfig(engine="dfs2sql", max_depth=2, agg_primitives=["count", "mean"], use_cutoff_time=True)
+
+            ft_engine = get_dfs_engine("featuretools", ft_config)
+            sql_engine = get_dfs_engine("dfs2sql", sql_config)
+
+            ft_result = ft_engine.compute_features(
+                rdb=rdb_dataset, target_dataframe=target_df, key_mappings=key_mappings, cutoff_time_column="cutoff_time"
+            )
+            sql_result = sql_engine.compute_features(
+                rdb=rdb_dataset, target_dataframe=target_df, key_mappings=key_mappings, cutoff_time_column="cutoff_time"
+            )
+
+            # Compare results
+            self._compare_engine_results(ft_result, sql_result, target_df.columns)
+            print(f"✓ Engines produce identical results for {scenario_name}")
+
+        print(f"\n✓ All engine consistency tests passed across {len(scenarios_to_test)} scenarios")
+        print("Note: exact_boundary scenario skipped due to known featuretools cutoff boundary bug")
+
+    def _compare_engine_results(self, ft_result, sql_result, target_columns):
+        """Helper method to compare results between engines."""
+        # Both should have same shape
+        assert ft_result.shape == sql_result.shape, \
+            f"Shape mismatch: FT {ft_result.shape} vs SQL {sql_result.shape}"
+
+        # Both should have same feature columns (excluding target columns)
+        ft_features = [col for col in ft_result.columns if col not in target_columns]
+        sql_features = [col for col in sql_result.columns if col not in target_columns]
+        assert set(ft_features) == set(sql_features), \
+            f"Feature columns differ: FT={ft_features}, SQL={sql_features}"
+
+        # Feature values should match within tolerance
+        for feature in ft_features:
+            ft_values = ft_result[feature].fillna(0).values
+            sql_values = sql_result[feature].fillna(0).values
+            assert np.allclose(ft_values, sql_values, rtol=1e-5, atol=1e-8), \
+                f"Feature values differ for {feature}"

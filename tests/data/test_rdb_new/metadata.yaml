@@ -1,0 +1,35 @@
+dataset_name: sbm_user_item
+tables:
+- columns:
+  - dtype: primary_key
+    name: user_id
+  - dtype: float
+    name: user_feature_0
+  format: numpy
+  name: user
+  source: data/user.npz
+- columns:
+  - capacity: 100
+    dtype: primary_key
+    name: item_id
+  - dtype: float
+    in_size: 1
+    name: item_feature_0
+  format: numpy
+  name: item
+  source: data/item.npz
+- columns:
+  - capacity: 100
+    dtype: foreign_key
+    link_to: user.user_id
+    name: user_id
+  - capacity: 100
+    dtype: foreign_key
+    link_to: item.item_id
+    name: item_id
+  - dtype: datetime
+    name: timestamp
+  format: numpy
+  name: interaction
+  source: data/interaction.npz
+  time_column: timestamp
