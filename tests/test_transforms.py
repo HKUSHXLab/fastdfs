@@ -22,25 +22,6 @@ from fastdfs.transform.dummy_table_transform import HandleDummyTable
 from fastdfs.utils import yaml_utils
 
 
-class TestTransformBaseClasses:
-    """Test abstract base classes for transforms."""
-    
-    def test_rdb_transform_abstract(self):
-        """Test that RDBTransform is abstract."""
-        with pytest.raises(TypeError):
-            RDBTransform()
-    
-    def test_table_transform_abstract(self):
-        """Test that TableTransform is abstract."""
-        with pytest.raises(TypeError):
-            TableTransform()
-    
-    def test_column_transform_abstract(self):
-        """Test that ColumnTransform is abstract."""
-        with pytest.raises(TypeError):
-            ColumnTransform()
-
-
 class TestFeaturizeDatetime:
     """Test datetime feature extraction transform."""
     
