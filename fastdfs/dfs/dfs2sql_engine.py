@@ -37,7 +37,7 @@ class DFS2SQLEngine(DFSEngine):
         """Compute feature values using SQL generation (reuse existing computation logic)."""
 
         # Set up database with RDB tables + target table
-        target_index = self._determine_target_index(target_dataframe, key_mappings)
+        target_index = "__target_index__"  # Target index is already handled by base class
         builder = DuckDBBuilder(Path(config.engine_path))
         self._build_database_tables(builder, rdb, target_dataframe, target_index, cutoff_time_column)
         db = builder.db
@@ -82,28 +82,21 @@ class DFS2SQLEngine(DFSEngine):
         # Merge all feature dataframes
         if dataframes:
             logger.debug("Finalizing ...")
-            merged_df = pd.DataFrame(
-                reduce(lambda left, right: pd.merge(left, right, on=target_index), dataframes)
-            )
+            # Instead of using reduce, merge iteratively and maintain order
+            merged_df = dataframes[0]
+            for df in dataframes[1:]:
+                # Merge preserving the order of the left dataframe (merged_df)
+                merged_df = pd.merge(merged_df, df, on=target_index, how='left')
 
-            # Merge with original target dataframe to preserve original columns and order
-            # Shallow copy to allow adding synthetic index column without affecting original
-            if target_index not in target_dataframe.columns:
-                original_target_with_index = target_dataframe.copy(deep=False)
-                original_target_with_index[target_index] = self._determine_target_index(original_target_with_index, key_mappings)
-            else:
-                original_target_with_index = target_dataframe
+            # Sort both dataframes by target index to ensure consistent row order
+            merged_df = merged_df.sort_values(by=target_index).reset_index(drop=True)
 
-            # Merge to get original columns + new features
-            result = pd.merge(
-                original_target_with_index,
-                merged_df,
-                on=target_index,
-                how='left'
-            )
-
-            # Remove the synthetic target index
-            result = result.drop(columns=[target_index])
+            # Since both dataframes are sorted by target_index, we can concatenate along column axis
+            # First drop target_index from merged_df to avoid duplication
+            feature_columns = merged_df.drop(columns=[target_index])
+            
+            # Concatenate along column axis (axis=1)
+            result = pd.concat([target_dataframe, feature_columns], axis=1)
 
             return result
         else:
@@ -140,14 +133,8 @@ class DFS2SQLEngine(DFSEngine):
                 time_index=table_meta.time_column
             )
 
-        # Add target dataframe as __target__ table
-        target_df_for_db = target_dataframe
-        needs_index_column = target_index not in target_dataframe.columns
-        
-        if needs_index_column:
-            # Shallow copy to allow adding synthetic index column without affecting original
-            target_df_for_db = target_dataframe.copy(deep=False)
-            target_df_for_db[target_index] = self._determine_target_index(target_df_for_db, {})
+        # Add target dataframe as __target__ table (target_index is already in dataframe)
+        target_df_for_db = target_dataframe.copy(deep=False)
 
         builder.add_dataframe(
             dataframe_name="__target__",
@@ -161,8 +148,8 @@ class DFS2SQLEngine(DFSEngine):
 
         # Set up cutoff time information
         if cutoff_time_column:
-            # Create cutoff time dataframe with only necessary columns (shallow copy)
-            cutoff_time = target_df_for_db[[target_index, cutoff_time_column]].copy()
+            # Create cutoff time dataframe with only necessary columns
+            cutoff_time = target_df_for_db[[target_index, cutoff_time_column]]
             cutoff_time.columns = [target_index, "time"]
             builder.set_cutoff_time(cutoff_time)
 

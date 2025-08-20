@@ -114,10 +114,16 @@ class DFSEngine:
 
         # Handle empty target dataframe
         if len(target_dataframe) == 0:
-            return target_dataframe.copy()
+            return target_dataframe
+
+        # Add default index to target dataframe before prepare_features
+        target_df_with_index = target_dataframe.copy(deep=False)
+        target_index = "__target_index__"
+        if target_index not in target_df_with_index.columns:
+            target_df_with_index[target_index] = range(len(target_df_with_index))
 
         # Phase 1: Feature preparation (common logic in base class)
-        features = self.prepare_features(rdb, target_dataframe, key_mappings, cutoff_time_column, config)
+        features = self.prepare_features(rdb, target_df_with_index, key_mappings, cutoff_time_column, config)
 
         if len(features) == 0:
             logger.warning("No features generated, check your configuration or data.")
@@ -125,12 +131,11 @@ class DFSEngine:
 
         # Phase 2: Feature computation (engine-specific logic in subclasses)
         feature_matrix = self.compute_feature_matrix(
-            rdb, target_dataframe, key_mappings, cutoff_time_column, features, config
+            rdb, target_df_with_index, key_mappings, cutoff_time_column, features, config
         )
 
-        # Remove the temporary index column if it was added
-        target_index = self._determine_target_index(target_dataframe.copy(), key_mappings)
-        if target_index == "__target_index__" and target_index in feature_matrix.columns:
+        # Remove the temporary index column from the result
+        if target_index in feature_matrix.columns:
             feature_matrix = feature_matrix.drop(columns=[target_index])
 
         return feature_matrix
@@ -158,11 +163,11 @@ class DFSEngine:
 
         # Add target dataframe as temporary entity
         target_entity_name = "__target__"
-        target_index = self._determine_target_index(target_dataframe, key_mappings)
+        target_index = "__target_index__"  # This should already be in the dataframe
 
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
-            dataframe=target_dataframe.copy(),
+            dataframe=target_dataframe,
             index=target_index,
             time_index=cutoff_time_column
         )
@@ -251,14 +256,6 @@ class DFSEngine:
             )
 
         return entity_set
-
-    def _determine_target_index(self, target_df: pd.DataFrame, key_mappings: Dict[str, str]) -> str:
-        """Determine appropriate index for target dataframe."""
-        # Use a simple default index for all cases
-        index_col = "__target_index__"
-        if index_col not in target_df.columns:
-            target_df[index_col] = range(len(target_df))
-        return index_col
 
     def _add_target_relationships(
         self, entity_set: ft.EntitySet, target_entity_name: str, key_mappings: Dict[str, str]
