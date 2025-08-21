@@ -14,7 +14,7 @@ from loguru import logger
 import pydantic
 
 from ..dataset.rdb import RDBDataset
-from ..dataset.meta import DBBColumnDType, DBBColumnSchema
+from ..dataset.meta import RDBColumnDType, RDBColumnSchema
 
 __all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine']
 
@@ -223,7 +223,7 @@ class DFSEngine:
                 series, log_ty, tag = parse_one_column(col_schema, col_data)
                 logical_types[col_name] = log_ty
 
-                if col_schema.dtype == DBBColumnDType.primary_key:
+                if col_schema.dtype == RDBColumnDType.primary_key:
                     index_col = col_name
                     # Don't set semantic tag for index
                 else:
@@ -346,13 +346,13 @@ def get_dfs_engine(name: str, config: DFSConfig) -> DFSEngine:
 # Internal utilities
 
 def parse_one_column(
-    col_schema: DBBColumnSchema, col_data: np.ndarray
+    col_schema: RDBColumnSchema, col_data: np.ndarray
 ) -> Tuple[pd.Series, str, str]:
-    if col_schema.dtype == DBBColumnDType.category_t:
+    if col_schema.dtype == RDBColumnDType.category_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "Categorical"
         tag = "category"
-    elif col_schema.dtype == DBBColumnDType.float_t:
+    elif col_schema.dtype == RDBColumnDType.float_t:
         if col_data.ndim > 1:
             series = pd.Series(list(col_data))
             log_ty = "Array"
@@ -361,19 +361,19 @@ def parse_one_column(
             series = pd.Series(col_data, copy=False)
             log_ty = "Double"
             tag = "numeric"
-    elif col_schema.dtype == DBBColumnDType.datetime_t:
+    elif col_schema.dtype == RDBColumnDType.datetime_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "Datetime"
         tag = "string"
-    elif col_schema.dtype == DBBColumnDType.text_t:
+    elif col_schema.dtype == RDBColumnDType.text_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "Text"
         tag = "text"
-    elif col_schema.dtype == DBBColumnDType.primary_key:
+    elif col_schema.dtype == RDBColumnDType.primary_key:
         series = pd.Series(col_data, copy=False)
         log_ty = "Categorical"
         tag = "index"
-    elif col_schema.dtype == DBBColumnDType.foreign_key:
+    elif col_schema.dtype == RDBColumnDType.foreign_key:
         series = pd.Series(col_data, copy=False)
         log_ty = "Categorical"
         tag = "foreign_key"

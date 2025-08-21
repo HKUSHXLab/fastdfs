@@ -8,7 +8,7 @@ fastdfs/utils/datetime_utils.py.
 
 from typing import List, Tuple
 import pandas as pd
-from ..dataset.meta import DBBColumnSchema, DBBColumnDType, RDBTableSchema
+from ..dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema
 from ..utils.datetime_utils import featurize_datetime_column
 from .base import ColumnTransform
 
@@ -27,15 +27,15 @@ class FeaturizeDatetime(ColumnTransform):
         """
         self.features = features or ['year', 'month', 'day', 'hour']
     
-    def applies_to(self, column_metadata: DBBColumnSchema) -> bool:
+    def applies_to(self, column_metadata: RDBColumnSchema) -> bool:
         """Check if this transform should be applied to datetime columns."""
-        return column_metadata.dtype == DBBColumnDType.datetime_t
+        return column_metadata.dtype == RDBColumnDType.datetime_t
     
-    def __call__(self, column: pd.Series, column_metadata: DBBColumnSchema) -> Tuple[pd.DataFrame, List[DBBColumnSchema]]:
+    def __call__(self, column: pd.Series, column_metadata: RDBColumnSchema) -> Tuple[pd.DataFrame, List[RDBColumnSchema]]:
         """Extract datetime features from a datetime column."""
         
         # Check if this is a datetime column
-        if column_metadata.dtype != DBBColumnDType.datetime_t:
+        if column_metadata.dtype != RDBColumnDType.datetime_t:
             # Return original column as DataFrame
             return pd.DataFrame({column_metadata.name: column}), [column_metadata]
         
@@ -48,9 +48,9 @@ class FeaturizeDatetime(ColumnTransform):
         
         for feature_name in feature_df.columns:
             if feature_name != base_name:  # Skip original column if included
-                new_col_schema = DBBColumnSchema(
+                new_col_schema = RDBColumnSchema(
                     name=feature_name,
-                    dtype=DBBColumnDType.float_t  # Datetime features are typically numeric
+                    dtype=RDBColumnDType.float_t  # Datetime features are typically numeric
                 )
                 new_column_schemas.append(new_col_schema)
         

@@ -1,17 +1,17 @@
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pydantic
-from dataclasses import dataclass
+from pydantic import BaseModel
 
 __all__ = [
-    "DBBColumnDType",
-    "DBBColumnSchema",
-    "DBBTableDataFormat",
+    "RDBColumnDType",
+    "RDBColumnSchema",
+    "RDBTableDataFormat",
     "RDBTableSchema",
     "RDBDatasetMeta"
 ]
 
-class DBBColumnDType(str, Enum):
+class RDBColumnDType(str, Enum):
     """Column data type model."""
     float_t = 'float'            # np.float32
     category_t = 'category'      # object
@@ -21,7 +21,7 @@ class DBBColumnDType(str, Enum):
     foreign_key = 'foreign_key'  # object
     primary_key = 'primary_key'  # object
 
-class DBBColumnSchema(pydantic.BaseModel):
+class RDBColumnSchema(BaseModel):
     """Column schema model.
 
     Column schema allows extra fields other than the explicitly defined members.
@@ -34,30 +34,34 @@ class DBBColumnSchema(pydantic.BaseModel):
     # Column name.
     name : str
     # Column data type
-    dtype : DBBColumnDType
+    dtype : RDBColumnDType
 
-class DBBTableDataFormat(str, Enum):
+class RDBTableDataFormat(str, Enum):
     PARQUET = 'parquet'
     NUMPY = 'numpy'
 
-@dataclass
-class RDBTableSchema:
+class RDBTableSchema(BaseModel):
     """Simplified table schema without task-specific metadata."""
+    class Config:
+        use_enum_values = True
+    
     name: str
     source: str
-    format: DBBTableDataFormat
-    columns: List[DBBColumnSchema]
+    format: RDBTableDataFormat
+    columns: List[RDBColumnSchema]
     time_column: Optional[str] = None
     
     @property
-    def column_dict(self) -> Dict[str, DBBColumnSchema]:
+    def column_dict(self) -> Dict[str, RDBColumnSchema]:
         """Get column schemas in a dictionary where the keys are column names."""
         return {col_schema.name: col_schema for col_schema in self.columns}
 
 
-@dataclass  
-class RDBDatasetMeta:
+class RDBDatasetMeta(BaseModel):
     """Simplified dataset metadata without tasks."""
+    class Config:
+        use_enum_values = True
+    
     dataset_name: str
     tables: List[RDBTableSchema]
     
@@ -67,7 +71,7 @@ class RDBDatasetMeta:
         relationships = []
         for table in self.tables:
             for col in table.columns:
-                if col.dtype == DBBColumnDType.foreign_key:
+                if col.dtype == RDBColumnDType.foreign_key:
                     parent_table, parent_col = col.link_to.split('.')
                     relationships.append((
                         table.name,    # child table
@@ -76,5 +80,3 @@ class RDBDatasetMeta:
                         parent_col     # parent column
                     ))
         return relationships
-
-

@@ -17,9 +17,9 @@ from .loader import get_table_data_loader
 from .meta import (
     RDBDatasetMeta,
     RDBTableSchema,
-    DBBColumnDType,
-    DBBColumnSchema,
-    DBBTableDataFormat,
+    RDBColumnDType,
+    RDBColumnSchema,
+    RDBTableDataFormat,
 )
 
 __all__ = ['RDBDataset']
@@ -47,9 +47,9 @@ class RDBDataset:
             table_schema = RDBTableSchema(
                 name=table_data['name'],
                 source=table_data['source'],
-                format=DBBTableDataFormat(table_data['format']),
+                format=RDBTableDataFormat(table_data['format']),
                 columns=[
-                    DBBColumnSchema(**col_data) 
+                    RDBColumnSchema(**col_data) 
                     for col_data in table_data['columns']
                 ],
                 time_column=table_data.get('time_column')
@@ -157,19 +157,19 @@ class RDBDataset:
             columns = []
             for col_schema in table_schema.columns:
                 # Map column types to SQLAlchemy types
-                if col_schema.dtype == DBBColumnDType.float_t:
+                if col_schema.dtype == RDBColumnDType.float_t:
                     sql_type = Float
-                elif col_schema.dtype == DBBColumnDType.datetime_t:
+                elif col_schema.dtype == RDBColumnDType.datetime_t:
                     sql_type = DateTime
-                elif col_schema.dtype == DBBColumnDType.primary_key:
+                elif col_schema.dtype == RDBColumnDType.primary_key:
                     sql_type = String
-                elif col_schema.dtype == DBBColumnDType.foreign_key:
+                elif col_schema.dtype == RDBColumnDType.foreign_key:
                     sql_type = String
                 else:
                     sql_type = String
                 
                 # Create column (add foreign keys later)
-                if col_schema.dtype == DBBColumnDType.primary_key:
+                if col_schema.dtype == RDBColumnDType.primary_key:
                     col = Column(col_schema.name, sql_type, primary_key=True)
                 else:
                     col = Column(col_schema.name, sql_type)

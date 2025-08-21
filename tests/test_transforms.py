@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch
 
-from fastdfs.dataset.meta import DBBColumnSchema, DBBColumnDType, DBBTableDataFormat
+from fastdfs.dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableDataFormat
 from fastdfs.dataset.rdb import RDBDataset, RDBTableSchema, RDBDatasetMeta
 from fastdfs.transform.base import RDBTransform, TableTransform, ColumnTransform
 from fastdfs.transform.datetime_transform import FeaturizeDatetime
@@ -39,7 +39,7 @@ class TestFeaturizeDatetime:
         cls.datetime_column = None
         cls.datetime_metadata = None
         for col_schema in cls.interaction_metadata.columns:
-            if col_schema.dtype == DBBColumnDType.datetime_t:
+            if col_schema.dtype == RDBColumnDType.datetime_t:
                 cls.datetime_column = cls.interaction_table[col_schema.name]
                 cls.datetime_metadata = col_schema
                 break
@@ -58,7 +58,7 @@ class TestFeaturizeDatetime:
         # Check result structure
         assert isinstance(result_df, pd.DataFrame)
         assert len(result_schemas) >= 3  # At least 3 features
-        assert all(isinstance(schema, DBBColumnSchema) for schema in result_schemas)
+        assert all(isinstance(schema, RDBColumnSchema) for schema in result_schemas)
         
         # Check that feature columns were created
         expected_features = ['timestamp_year', 'timestamp_month', 'timestamp_day']
@@ -89,7 +89,7 @@ class TestFilterColumn:
         """Set up test dataset with synthetic columns."""
         test_data_path = Path(__file__).parent / "data" / "test_rdb_new"
         cls.original_dataset = RDBDataset(test_data_path)
-        cls.transform = FilterColumn(drop_dtypes=[DBBColumnDType.text_t], drop_redundant=True)
+        cls.transform = FilterColumn(drop_dtypes=[RDBColumnDType.text_t], drop_redundant=True)
         
         # Create test dataset with synthetic columns added
         cls.temp_dir = None
@@ -217,13 +217,13 @@ class TestFilterColumn:
         
         # Get original primary key columns
         original_pk_cols = [col for col in user_metadata.columns 
-                           if col.dtype == DBBColumnDType.primary_key]
+                           if col.dtype == RDBColumnDType.primary_key]
         
         result_table, result_metadata = self.transform(user_table, user_metadata)
         
         # Check that primary keys are preserved
         result_pk_cols = [col for col in result_metadata.columns 
-                         if col.dtype == DBBColumnDType.primary_key]
+                         if col.dtype == RDBColumnDType.primary_key]
         
         # All primary keys should be preserved
         assert len(result_pk_cols) == len(original_pk_cols)
@@ -238,13 +238,13 @@ class TestFilterColumn:
         
         # Get original foreign key columns
         original_fk_cols = [col for col in interaction_metadata.columns 
-                           if col.dtype == DBBColumnDType.foreign_key]
+                           if col.dtype == RDBColumnDType.foreign_key]
         
         result_table, result_metadata = self.transform(interaction_table, interaction_metadata)
         
         # Check that foreign keys are preserved
         result_fk_cols = [col for col in result_metadata.columns 
-                         if col.dtype == DBBColumnDType.foreign_key]
+                         if col.dtype == RDBColumnDType.foreign_key]
         
         # All foreign keys should be preserved
         assert len(result_fk_cols) == len(original_fk_cols)
@@ -258,7 +258,7 @@ class TestFilterColumn:
         user_metadata = self.dataset_with_synthetic.get_table_metadata('user')
         
         original_columns = len(user_metadata.columns)
-        original_text_cols = [col for col in user_metadata.columns if col.dtype == DBBColumnDType.text_t]
+        original_text_cols = [col for col in user_metadata.columns if col.dtype == RDBColumnDType.text_t]
         
         result_table, result_metadata = self.transform(user_table, user_metadata)
         
@@ -266,7 +266,7 @@ class TestFilterColumn:
         assert len(result_metadata.columns) < original_columns
         
         # Text columns should be filtered out
-        result_text_cols = [col for col in result_metadata.columns if col.dtype == DBBColumnDType.text_t]
+        result_text_cols = [col for col in result_metadata.columns if col.dtype == RDBColumnDType.text_t]
         assert len(result_text_cols) == 0
         
         # Redundant columns should be filtered out
@@ -275,9 +275,9 @@ class TestFilterColumn:
         
         # But still preserve keys
         original_keys = [col for col in user_metadata.columns 
-                        if col.dtype in [DBBColumnDType.primary_key, DBBColumnDType.foreign_key]]
+                        if col.dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]]
         result_keys = [col for col in result_metadata.columns 
-                      if col.dtype in [DBBColumnDType.primary_key, DBBColumnDType.foreign_key]]
+                      if col.dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]]
         assert len(result_keys) == len(original_keys)
     
     def test_filter_preserves_essential_columns(self):
@@ -290,13 +290,13 @@ class TestFilterColumn:
             
             # Should preserve all key columns
             essential_cols = [col for col in table_metadata.columns 
-                            if col.dtype in [DBBColumnDType.primary_key, DBBColumnDType.foreign_key]]
+                            if col.dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]]
             
             for essential_col in essential_cols:
                 assert essential_col.name in result_table.columns
                 
             # Should remove text columns (our synthetic redundant columns)
-            result_text_cols = [col for col in result_metadata.columns if col.dtype == DBBColumnDType.text_t]
+            result_text_cols = [col for col in result_metadata.columns if col.dtype == RDBColumnDType.text_t]
             assert len(result_text_cols) == 0
             
             # Should remove truly redundant columns (all same values)
@@ -411,7 +411,7 @@ class TestHandleDummyTable:
         # Should have exactly one column (the primary key)
         assert len(recovered_user_metadata.columns) == 1
         assert recovered_user_metadata.columns[0].name == 'user_id'
-        assert recovered_user_metadata.columns[0].dtype == DBBColumnDType.primary_key
+        assert recovered_user_metadata.columns[0].dtype == RDBColumnDType.primary_key
         
         # Verify that the table contains the referenced user IDs from interaction table
         interaction_table = incomplete_dataset.get_table('interaction')
@@ -443,7 +443,7 @@ class TestHandleDummyTable:
         # Should have exactly one column (the primary key)
         assert len(recovered_item_metadata.columns) == 1
         assert recovered_item_metadata.columns[0].name == 'item_id'
-        assert recovered_item_metadata.columns[0].dtype == DBBColumnDType.primary_key
+        assert recovered_item_metadata.columns[0].dtype == RDBColumnDType.primary_key
         
         # Verify that the table contains the referenced item IDs from interaction table
         interaction_table = incomplete_dataset.get_table('interaction')

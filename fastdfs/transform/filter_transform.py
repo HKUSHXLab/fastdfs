@@ -8,7 +8,7 @@ fastdfs/preprocess/transform/filter_column.py.
 
 from typing import List, Optional, Tuple
 import pandas as pd
-from ..dataset.meta import RDBTableSchema, DBBColumnDType
+from ..dataset.meta import RDBTableSchema, RDBColumnDType
 from .base import TableTransform
 
 
@@ -34,7 +34,7 @@ class FilterColumn(TableTransform):
             col_name = col_schema.name
             
             # Never drop primary or foreign keys
-            if col_schema.dtype in [DBBColumnDType.primary_key, DBBColumnDType.foreign_key]:
+            if col_schema.dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]:
                 continue
                 
             # Skip vector embeddings (multi-dimensional data)
@@ -48,7 +48,7 @@ class FilterColumn(TableTransform):
                     pass  # If check fails, continue with normal processing
                 
             # Drop redundant columns (single unique value)
-            if self.drop_redundant and col_schema.dtype != DBBColumnDType.text_t:
+            if self.drop_redundant and col_schema.dtype != RDBColumnDType.text_t:
                 if col_name in table.columns:
                     unique_values = table[col_name].nunique(dropna=False)
                     if unique_values <= 1:

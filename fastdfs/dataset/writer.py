@@ -4,7 +4,7 @@ import numpy as np
 import abc
 import pandas as pd
 
-from .meta import DBBTableDataFormat
+from .meta import RDBTableDataFormat
 
 class TableWriter:
 
@@ -37,12 +37,12 @@ class NumpyTableWriter(TableWriter):
     def filename(self, path: Path, table_name: str) -> Path:
         return path / f"{table_name}.npz"
 
-def get_table_data_writer(format : DBBTableDataFormat) -> TableWriter:
+def get_table_data_writer(format : RDBTableDataFormat) -> TableWriter:
     if format not in WRITER_MAP:
         raise ValueError(f"Unsupported table format: {format}")
     return WRITER_MAP[format]()
 
 WRITER_MAP = {
-    DBBTableDataFormat.PARQUET : ParquetTableWriter,
-    DBBTableDataFormat.NUMPY : NumpyTableWriter,
+    RDBTableDataFormat.PARQUET : ParquetTableWriter,
+    RDBTableDataFormat.NUMPY : NumpyTableWriter,
 }

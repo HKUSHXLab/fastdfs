@@ -16,7 +16,7 @@ from fastdfs.dataset.rdb import (
     convert_task_dataset_to_rdb,
     extract_target_tables_from_tasks
 )
-from fastdfs.dataset.meta import DBBColumnDType, DBBTableDataFormat
+from fastdfs.dataset.meta import RDBColumnDType, RDBTableDataFormat
 
 
 class TestRDBDataset:
@@ -74,7 +74,7 @@ class TestRDBDataset:
         user_meta = rdb_dataset.get_table_metadata("user")
         assert user_meta.name == "user"
         assert user_meta.source == "data/user.npz"
-        assert user_meta.format == DBBTableDataFormat.NUMPY
+        assert user_meta.format == RDBTableDataFormat.NUMPY
         assert len(user_meta.columns) == 2
         
         # Check column metadata
@@ -85,7 +85,7 @@ class TestRDBDataset:
                 break
         
         assert user_id_col is not None
-        assert user_id_col.dtype == DBBColumnDType.primary_key
+        assert user_id_col.dtype == RDBColumnDType.primary_key
     
     def test_get_relationships(self, rdb_dataset):
         """Test extracting relationships from foreign keys."""

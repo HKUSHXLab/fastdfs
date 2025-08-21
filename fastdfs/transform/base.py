@@ -9,7 +9,7 @@ import abc
 from typing import List, Dict, Optional, Tuple, Union
 import pandas as pd
 
-from ..dataset.meta import DBBColumnSchema, RDBTableSchema
+from ..dataset.meta import RDBColumnSchema, RDBTableSchema
 from ..dataset.rdb import RDBDataset
 
 class RDBTransform(abc.ABC):
@@ -60,12 +60,12 @@ class ColumnTransform(abc.ABC):
     """Transform that operates on specific columns matching criteria."""
     
     @abc.abstractmethod
-    def applies_to(self, column_metadata: DBBColumnSchema) -> bool:
+    def applies_to(self, column_metadata: RDBColumnSchema) -> bool:
         """Check if this transform should be applied to a column."""
         pass
     
     @abc.abstractmethod
-    def __call__(self, column: pd.Series, column_metadata: DBBColumnSchema) -> Tuple[pd.DataFrame, List[DBBColumnSchema]]:
+    def __call__(self, column: pd.Series, column_metadata: RDBColumnSchema) -> Tuple[pd.DataFrame, List[RDBColumnSchema]]:
         """
         Transform a column, potentially outputting multiple new columns.
         

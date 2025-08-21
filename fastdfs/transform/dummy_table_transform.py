@@ -8,7 +8,7 @@ in fastdfs/preprocess/transform/dummy_table.py.
 
 from typing import Dict, List, Set
 import pandas as pd
-from ..dataset.meta import DBBColumnSchema, DBBColumnDType, RDBTableSchema
+from ..dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema, RDBTableDataFormat
 from ..dataset.rdb import RDBDataset
 from .base import RDBTransform
 
@@ -96,15 +96,15 @@ class HandleDummyTable(RDBTransform):
         dummy_df = pd.DataFrame({pk_column: pk_values_list})
         
         # Create metadata schema
-        pk_col_schema = DBBColumnSchema(
+        pk_col_schema = RDBColumnSchema(
             name=pk_column,
-            dtype=DBBColumnDType.primary_key
+            dtype=RDBColumnDType.primary_key
         )
         
         dummy_metadata = RDBTableSchema(
             name=table_name,
             source=f"dummy_{table_name}",
-            format="generated",
+            format=RDBTableDataFormat.NUMPY,
             columns=[pk_col_schema],
             time_column=None
         )
