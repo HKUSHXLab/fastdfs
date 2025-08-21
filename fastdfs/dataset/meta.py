@@ -1,26 +1,17 @@
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pydantic
+from pydantic import BaseModel
 
 __all__ = [
-    "TIMESTAMP_FEATURE_NAME",
-    "DBBColumnDType",
-    "DTYPE_EXTRA_FIELDS",
-    "DBBColumnSchema",
-    "DBBTableDataFormat",
-    "DBBTableSchema",
-    "DBBTaskType",
-    "TASK_EXTRA_FIELDS",
-    "DBBTaskEvalMetric",
-    "DBBTaskMeta",
-    "DBBColumnID",
-    "DBBRelationship",
-    "DBBRDBDatasetMeta",
+    "RDBColumnDType",
+    "RDBColumnSchema",
+    "RDBTableDataFormat",
+    "RDBTableSchema",
+    "RDBDatasetMeta"
 ]
 
-TIMESTAMP_FEATURE_NAME = '__timestamp__'
-
-class DBBColumnDType(str, Enum):
+class RDBColumnDType(str, Enum):
     """Column data type model."""
     float_t = 'float'            # np.float32
     category_t = 'category'      # object
@@ -30,19 +21,7 @@ class DBBColumnDType(str, Enum):
     foreign_key = 'foreign_key'  # object
     primary_key = 'primary_key'  # object
 
-DTYPE_EXTRA_FIELDS = {
-    # in_size : An integer tells the size of the feature dimension.
-    DBBColumnDType.float_t : ["in_size"],
-    # num_categories : An integer tells the total number of categories.
-    DBBColumnDType.category_t : ["num_categories"],
-    # link_to : A string in the format of <TABLE>.<COLUMN>
-    # capacity : The number of unique keys.
-    DBBColumnDType.foreign_key : ["link_to", "capacity"],
-    # capacity : The number of unique keys.
-    DBBColumnDType.primary_key : ["capacity"],
-}
-
-class DBBColumnSchema(pydantic.BaseModel):
+class RDBColumnSchema(BaseModel):
     """Column schema model.
 
     Column schema allows extra fields other than the explicitly defined members.
@@ -54,115 +33,50 @@ class DBBColumnSchema(pydantic.BaseModel):
 
     # Column name.
     name : str
-    # Column data type.
-    dtype : DBBColumnDType
+    # Column data type
+    dtype : RDBColumnDType
 
-class DBBTableDataFormat(str, Enum):
+class RDBTableDataFormat(str, Enum):
     PARQUET = 'parquet'
     NUMPY = 'numpy'
 
-class DBBTableSchema(pydantic.BaseModel):
-    """Table schema model."""
-
-    # Name of the table.
-    name : str
-    # On-disk data path (relative to the root data folder) to load this table.
-    source: str
-    # On-disk format for storing this table.
-    format: DBBTableDataFormat
-    # Column schemas.
-    columns: List[DBBColumnSchema]
-    # Time column name.
-    time_column: Optional[str]
-
-    @property
-    def column_dict(self) -> Dict[str, DBBColumnSchema]:
-        """Get column schemas in a dictionary where the keys are column names."""
-        return {col_schema.name : col_schema for col_schema in self.columns}
-
-class DBBTaskType(str, Enum):
-    classification = 'classification'
-    regression = 'regression'
-    retrieval = 'retrieval'
-
-TASK_EXTRA_FIELDS = {
-    DBBTaskType.classification : ['num_classes'],
-    DBBTaskType.retrieval : [
-        'key_prediction_label_column',
-        'key_prediction_query_idx_column',
-    ],
-    DBBTaskType.regression : [],
-}
-
-class DBBTaskEvalMetric(str, Enum):
-    auroc = 'auroc'
-    ap = 'ap'
-    accuracy = 'accuracy'
-    f1 = 'f1'
-    hinge = 'hinge'
-    recall = 'recall'
-    mae = 'mae'
-    mse = 'mse'
-    msle = 'msle'
-    pearson = 'pearson'
-    rmse = 'rmse'
-    r2 = 'r2'
-    mrr = 'mrr'
-    hr = 'hr'
-    ndcg = 'ndcg'
-    logloss = 'logloss'
-
-class DBBTaskMeta(pydantic.BaseModel):
+class RDBTableSchema(BaseModel):
+    """Simplified table schema without task-specific metadata."""
     class Config:
-        extra = pydantic.Extra.allow
         use_enum_values = True
-
-    name : str
-    source : str
-    format : DBBTableDataFormat
-    columns : List[DBBColumnSchema]
-    time_column : Optional[str] = None
-
-    evaluation_metric : DBBTaskEvalMetric
-    target_column : str
-    target_table : str
-    task_type : Optional[DBBTaskType]
-    key_prediction_label_column: Optional[str] = "label"
-    key_prediction_query_idx_column: Optional[str] = "query_idx"
-
+    
+    name: str
+    source: str
+    format: RDBTableDataFormat
+    columns: List[RDBColumnSchema]
+    time_column: Optional[str] = None
+    
     @property
-    def column_dict(self) -> Dict[str, DBBColumnSchema]:
-        return {col_schema.name : col_schema for col_schema in self.columns}
+    def column_dict(self) -> Dict[str, RDBColumnSchema]:
+        """Get column schemas in a dictionary where the keys are column names."""
+        return {col_schema.name: col_schema for col_schema in self.columns}
 
-class DBBColumnID(pydantic.BaseModel):
-    table : str
-    column : str
 
-class DBBRelationship(pydantic.BaseModel):
-    fk : DBBColumnID
-    pk : DBBColumnID
-
-class DBBRDBDatasetMeta(pydantic.BaseModel):
-    """Dataset metadata model."""
-    # Dataset name.
-    dataset_name : str
-    # Table schemas.
-    tables : List[DBBTableSchema]
-    # Task metadata.
-    tasks : List[DBBTaskMeta]
-
+class RDBDatasetMeta(BaseModel):
+    """Simplified dataset metadata without tasks."""
+    class Config:
+        use_enum_values = True
+    
+    dataset_name: str
+    tables: List[RDBTableSchema]
+    
     @property
-    def relationships(self) -> List[DBBRelationship]:
-        """Get all relationships in a list."""
-        rels = []
+    def relationships(self) -> List[Tuple[str, str, str, str]]:
+        """Get relationships as (child_table, child_col, parent_table, parent_col)."""
+        relationships = []
         for table in self.tables:
             for col in table.columns:
-                if col.dtype == DBBColumnDType.foreign_key:
-                    link_tbl, link_col = col.link_to.split('.')
-                    fk = {'table' : table.name, 'column' : col.name}
-                    pk = {'table' : link_tbl, 'column' : link_col}
-                    rels.append(DBBRelationship.parse_obj({
-                        'fk' : fk, 'pk' : pk}))
-        return rels
-
-    column_groups : Optional[List[List[DBBColumnID]]] = None
+                if col.dtype == RDBColumnDType.foreign_key:
+                    parent_table, parent_col = col.link_to.split('.')
+                    relationships.append((
+                        table.name,    # child table
+                        col.name,      # child column
+                        parent_table,  # parent table  
+                        parent_col     # parent column
+                    ))
+        return relationships

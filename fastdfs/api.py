@@ -1,176 +1,144 @@
 """
-Enhanced API for FastDFS - Simplified interface for common DFS workflows
+Minimal API for the table-centric DFS interface.
+
+This module provides the core functions for computing DFS features using
+the simplified RDB dataset interface without task dependencies.
 """
 
+from typing import Dict, Optional, Any
+import pandas as pd
 from pathlib import Path
-from typing import Optional, Union
-from loguru import logger
 
-from .dataset import load_rdb_data, DBBRDBDataset
-from .preprocess.dfs import DFSPreprocess, DFSPreprocessConfig
-from .preprocess.transform_preprocess import RDBTransformPreprocess, RDBTransformPreprocessConfig
-from .preprocess.dfs.core import DFSConfig
-from .utils.device import get_device_info
-from .utils import yaml_utils
+from .dfs import DFSConfig, get_dfs_engine
+from .dataset.rdb import RDBDataset
 
-def run_dfs(
-    dataset_path: Union[str, Path],
-    output_path: Union[str, Path],
-    max_depth: int = 2,
-    engine: str = "featuretools",
-    config_path: Optional[Union[str, Path]] = None,
-    use_cutoff_time: bool = False
-) -> None:
-    """Run DFS on a dataset with simplified interface.
-    
-    Args:
-        dataset_path: Path to input dataset directory
-        output_path: Path for output dataset
-        max_depth: Maximum depth for DFS (default: 2)
-        engine: DFS engine to use - "featuretools" or "dfs2sql" (default: "featuretools") 
-        config_path: Optional path to custom DFS config file
-        use_cutoff_time: Whether to use cutoff time for temporal features
+__all__ = ['load_rdb', 'compute_dfs_features', 'DFSPipeline']
+
+
+def load_rdb(path: str) -> RDBDataset:
     """
-    dataset_path = Path(dataset_path)
-    output_path = Path(output_path)
-    
-    logger.info(f"Loading dataset from {dataset_path}")
-    dataset = load_rdb_data(str(dataset_path))
-    
-    if config_path:
-        logger.info(f"Loading DFS config from {config_path}")
-        config = yaml_utils.load_pyd(DFSPreprocessConfig, config_path)
-    else:
-        logger.info(f"Using default DFS config with depth={max_depth}, engine={engine}")
-        dfs_config = DFSConfig(
-            max_depth=max_depth,
-            engine=engine,
-            use_cutoff_time=use_cutoff_time
-        )
-        config = DFSPreprocessConfig(dfs=dfs_config)
-    
-    logger.info("Running DFS preprocessing...")
-    processor = DFSPreprocess(config)
-    device = get_device_info()
-    processor.run(dataset, output_path, device)
-    
-    logger.info(f"DFS completed! Output saved to {output_path}")
-
-
-def run_transform(
-    dataset_path: Union[str, Path],
-    output_path: Union[str, Path], 
-    transform_type: str = "pre-dfs",
-    config_path: Optional[Union[str, Path]] = None
-) -> None:
-    """Run data transforms with simplified interface.
+    Load a relational database dataset.
     
     Args:
-        dataset_path: Path to input dataset directory
-        output_path: Path for output dataset
-        transform_type: Type of transforms - "pre-dfs", "post-dfs", or "single"
-        config_path: Optional path to custom transform config file
-    """
-    dataset_path = Path(dataset_path)
-    output_path = Path(output_path)
-    
-    logger.info(f"Loading dataset from {dataset_path}")
-    dataset = load_rdb_data(str(dataset_path))
-    
-    if config_path:
-        logger.info(f"Loading transform config from {config_path}")
-        config = yaml_utils.load_pyd(RDBTransformPreprocessConfig, config_path)
-    else:
-        # Use default configs based on transform type
-        fastdfs_root = Path(__file__).parent.parent  # Go up from fastdfs/fastdfs/ to fastdfs/
-        default_configs = {
-            "pre-dfs": fastdfs_root / "configs" / "transform" / "pre-dfs.yaml",
-            "post-dfs": fastdfs_root / "configs" / "transform" / "post-dfs.yaml", 
-            "single": fastdfs_root / "configs" / "transform" / "single.yaml"
-        }
-        
-        if transform_type not in default_configs:
-            raise ValueError(f"Unknown transform_type: {transform_type}. Must be one of {list(default_configs.keys())}")
-        
-        config_file = default_configs[transform_type]
-        logger.info(f"Using default {transform_type} config from {config_file}")
-        config = yaml_utils.load_pyd(RDBTransformPreprocessConfig, config_file)
-    
-    logger.info(f"Running {transform_type} transforms...")
-    processor = RDBTransformPreprocess(config)
-    device = get_device_info()
-    processor.run(dataset, output_path, device)
-    
-    logger.info(f"Transform completed! Output saved to {output_path}")
-
-
-def run_full_pipeline(
-    dataset_path: Union[str, Path],
-    output_path: Union[str, Path],
-    max_depth: int = 2,
-    engine: str = "featuretools",
-    use_cutoff_time: bool = False
-) -> None:
-    """Run complete DFS pipeline: pre-transform → DFS → post-transform.
-    
-    Args:
-        dataset_path: Path to input dataset directory
-        output_path: Path for final output dataset
-        max_depth: Maximum depth for DFS (default: 2)
-        engine: DFS engine to use - "featuretools" or "dfs2sql" (default: "featuretools")
-        use_cutoff_time: Whether to use cutoff time for temporal features
-    """
-    dataset_path = Path(dataset_path)
-    output_path = Path(output_path)
-    
-    # Create intermediate directories
-    temp_dir = output_path.parent / f"{output_path.name}_temp"
-    pre_dfs_path = temp_dir / "pre_dfs"
-    dfs_path = temp_dir / "dfs" 
-    
-    logger.info("Starting full DFS pipeline...")
-    
-    try:
-        # Step 1: Pre-DFS transforms
-        logger.info("Step 1/3: Running pre-DFS transforms...")
-        run_transform(dataset_path, pre_dfs_path, "pre-dfs")
-        
-        # Step 2: DFS
-        logger.info("Step 2/3: Running DFS...")
-        run_dfs(pre_dfs_path, dfs_path, max_depth, engine, use_cutoff_time=use_cutoff_time)
-        
-        # Step 3: Post-DFS transforms  
-        logger.info("Step 3/3: Running post-DFS transforms...")
-        run_transform(dfs_path, output_path, "post-dfs")
-        
-        logger.info(f"Full pipeline completed! Final output saved to {output_path}")
-        
-    finally:
-        # Clean up temporary files
-        import shutil
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir)
-            logger.debug(f"Cleaned up temporary directory {temp_dir}")
-
-
-def load_dataset(dataset_path: Union[str, Path]) -> DBBRDBDataset:
-    """Load a dataset for inspection or custom processing.
-    
-    Args:
-        dataset_path: Path to dataset directory
+        path: Path to the RDB dataset directory
         
     Returns:
-        DBBRDBDataset: The loaded dataset
+        RDBDataset instance
     """
-    return load_rdb_data(str(dataset_path))
+    return RDBDataset(Path(path))
 
 
-def save_dataset(dataset: DBBRDBDataset, output_path: Union[str, Path]) -> None:
-    """Save a dataset (placeholder - would need implementation).
+def compute_dfs_features(
+    rdb: RDBDataset,
+    target_dataframe: pd.DataFrame,
+    key_mappings: Dict[str, str],
+    cutoff_time_column: Optional[str] = None,
+    config: Optional[DFSConfig] = None,
+    config_overrides: Optional[Dict[str, Any]] = None
+) -> pd.DataFrame:
+    """
+    Compute DFS features for a target dataframe using RDB context.
     
     Args:
-        dataset: Dataset to save
-        output_path: Output directory path
+        rdb: The relational database providing context for feature generation
+        target_dataframe: DataFrame to augment with features
+        key_mappings: Map from target_dataframe columns to RDB primary keys
+                     e.g., {"user_id": "user.user_id", "item_id": "item.item_id"}
+        cutoff_time_column: Column name in target_dataframe for temporal cutoff
+        config: DFS configuration (uses defaults if not provided)
+        config_overrides: Dictionary of config parameters to override
+        
+    Returns:
+        DataFrame with original target_dataframe data plus generated features
+        
+    Example:
+        >>> rdb = load_rdb("ecommerce_rdb/")
+        >>> target_df = pd.DataFrame({
+        ...     "user_id": [1, 2, 3],
+        ...     "item_id": [100, 200, 300],
+        ...     "interaction_time": ["2024-01-01", "2024-01-02", "2024-01-03"]
+        ... })
+        >>> features_df = compute_dfs_features(
+        ...     rdb=rdb,
+        ...     target_dataframe=target_df,
+        ...     key_mappings={"user_id": "user.user_id", "item_id": "item.item_id"},
+        ...     cutoff_time_column="interaction_time",
+        ...     config_overrides={"max_depth": 2, "engine": "dfs2sql"}
+        ... )
     """
-    # This would need to be implemented based on dataset creator functionality
-    raise NotImplementedError("Dataset saving not yet implemented")
+    # Use default config if not provided
+    if config is None:
+        config = DFSConfig()
+    
+    # Get the appropriate engine
+    engine = get_dfs_engine(config.engine, config)
+    
+    # Compute features
+    return engine.compute_features(
+        rdb=rdb,
+        target_dataframe=target_dataframe,
+        key_mappings=key_mappings,
+        cutoff_time_column=cutoff_time_column,
+        config_overrides=config_overrides
+    )
+
+
+class DFSPipeline:
+    """
+    Pipeline for combining RDB transforms with DFS feature computation.
+    
+    This class allows you to compose preprocessing transforms with feature
+    generation in a single pipeline.
+    """
+    
+    def __init__(
+        self,
+        transform_pipeline = None,
+        dfs_config: Optional[DFSConfig] = None
+    ):
+        """
+        Initialize the DFS pipeline.
+        
+        Args:
+            transform_pipeline: RDB transform pipeline (optional)
+            dfs_config: DFS configuration (uses defaults if not provided)
+        """
+        self.transform_pipeline = transform_pipeline
+        self.dfs_config = dfs_config or DFSConfig()
+    
+    def compute_features(
+        self,
+        rdb: RDBDataset,
+        target_dataframe: pd.DataFrame,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str] = None,
+        config_overrides: Optional[Dict[str, Any]] = None
+    ) -> pd.DataFrame:
+        """
+        Apply transforms to RDB and compute DFS features.
+        
+        Args:
+            rdb: Input RDB dataset
+            target_dataframe: DataFrame to augment with features
+            key_mappings: Map from target_dataframe columns to RDB primary keys
+            cutoff_time_column: Column name for temporal cutoff
+            config_overrides: Dictionary of config parameters to override
+            
+        Returns:
+            DataFrame with features computed from transformed RDB
+        """
+        # Apply transforms if provided
+        if self.transform_pipeline is not None:
+            transformed_rdb = self.transform_pipeline(rdb)
+        else:
+            transformed_rdb = rdb
+        
+        # Compute features using transformed RDB
+        return compute_dfs_features(
+            rdb=transformed_rdb,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column=cutoff_time_column,
+            config=self.dfs_config,
+            config_overrides=config_overrides
+        )

@@ -1,10 +1,11 @@
-from typing import Dict
+from typing import Tuple, Dict, Optional, List, Any
 from pathlib import Path
+import os
 import numpy as np
 import abc
 import pandas as pd
 
-from .meta import RDBTableDataFormat
+from .meta import DBBTableDataFormat
 
 class TableWriter:
 
@@ -37,12 +38,12 @@ class NumpyTableWriter(TableWriter):
     def filename(self, path: Path, table_name: str) -> Path:
         return path / f"{table_name}.npz"
 
-def get_table_data_writer(format : RDBTableDataFormat) -> TableWriter:
+def get_table_data_writer(format : DBBTableDataFormat) -> TableWriter:
     if format not in WRITER_MAP:
         raise ValueError(f"Unsupported table format: {format}")
     return WRITER_MAP[format]()
 
 WRITER_MAP = {
-    RDBTableDataFormat.PARQUET : ParquetTableWriter,
-    RDBTableDataFormat.NUMPY : NumpyTableWriter,
+    DBBTableDataFormat.PARQUET : ParquetTableWriter,
+    DBBTableDataFormat.NUMPY : NumpyTableWriter,
 }
