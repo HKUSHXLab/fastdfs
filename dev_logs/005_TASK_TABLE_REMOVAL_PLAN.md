@@ -1496,50 +1496,17 @@ class RDBTransformPipeline(RDBTransform):
         return result
 ```
 
-### Phase 4: Updated CLI and API (Week 4)
+### Phase 4: New Python API (Week 4)
 
 **Current Code References**:
-- **CLI entry point**: `fastdfs/cli/main.py` (current command structure and argument parsing)
-- **CLI preprocessing**: `fastdfs/cli/preprocess.py` (current preprocessing command implementation)
 - **High-level API**: `fastdfs/api.py` (current public API functions)
 - **Configuration handling**: `fastdfs/utils/yaml_utils.py` (config loading) and `fastdfs/preprocess/dfs/core.py` (DFSConfig class)
 - **Dataset loading**: `fastdfs/dataset/__init__.py` (current dataset loading functions)
 - **Logging setup**: `fastdfs/utils/logging_config.py` (reuse existing logging configuration)
 
-#### 4.1 New CLI Interface
+#### 4.1 Minimal Python API
 
-```bash
-# New CLI commands (simplified, no tasks)
-
-# Load and inspect RDB
-fastdfs inspect /path/to/rdb
-
-# Apply transforms to RDB  
-fastdfs transform /path/to/rdb /path/to/output --config pre-dfs.yaml
-
-# Compute DFS features for a target dataframe (loaded from file)
-fastdfs compute-features /path/to/rdb /path/to/target.parquet /path/to/output \
-  --key-mappings user_id=user.user_id,item_id=item.item_id \
-  --cutoff-time-column timestamp \
-  --config configs/dfs/dfs-2.yaml \
-  --config-overrides max_depth=3,engine=dfs2sql
-
-# Compute DFS features with inline configuration
-fastdfs compute-features /path/to/rdb /path/to/target.parquet /path/to/output \
-  --key-mappings user_id=user.user_id,item_id=item.item_id \
-  --cutoff-time-column timestamp \
-  --max-depth 2 \
-  --engine dfs2sql \
-  --agg-primitives count,mean,max,min
-
-# Full pipeline: transform RDB + compute features
-fastdfs pipeline /path/to/rdb /path/to/target.parquet /path/to/output \
-  --key-mappings user_id=user.user_id,item_id=item.item_id \
-  --transform-config configs/transform/pre-dfs.yaml \
-  --dfs-config configs/dfs/dfs-2.yaml
-```
-
-#### 4.2 New Python API
+**Focus**: Create a minimal, intuitive Python API that focuses on the core table-centric DFS workflow without CLI complexity.
 
 **Current Code References**:
 - **API functions**: `fastdfs/api.py` functions like `run_preprocess()` (lines 20-80) - *adapt for new interfaces*
@@ -1547,18 +1514,27 @@ fastdfs pipeline /path/to/rdb /path/to/target.parquet /path/to/output \
 - **Engine instantiation**: `fastdfs/preprocess/dfs/core.py` engine creation logic - *adapt for new compute_features interface*
 - **Configuration merging**: Pattern from existing config override handling in various modules
 
+**Core Functions**:
+- `load_rdb(path)` - Load RDB dataset
+- `compute_dfs_features(rdb, target_dataframe, key_mappings, ...)` - Generate features 
+- `DFSPipeline` - Combine transforms with feature generation
+
 ```python
 import fastdfs
 import pandas as pd
+from fastdfs.transform import RDBTransformPipeline, HandleDummyTable, FeaturizeDatetime, FilterColumn, RDBTransformWrapper
 
 # Load RDB (no tasks)
 rdb = fastdfs.load_rdb("/path/to/rdb")
 
-# Load target dataframe from file or create programmatically
-target_df = pd.read_parquet("user_item_interactions.parquet")
-# target_df columns: user_id, item_id, interaction_time
+# Create target dataframe
+target_df = pd.DataFrame({
+    "user_id": [1, 2, 3],
+    "item_id": [100, 200, 300],
+    "interaction_time": ["2024-01-01", "2024-01-02", "2024-01-03"]
+})
 
-# Method 1: Use default configuration with overrides
+# Method 1: Direct feature computation
 features_df = fastdfs.compute_dfs_features(
     rdb=rdb,
     target_dataframe=target_df,
@@ -1569,45 +1545,24 @@ features_df = fastdfs.compute_dfs_features(
     cutoff_time_column="interaction_time",
     config_overrides={
         "max_depth": 2,
-        "engine": "dfs2sql",
+        "engine": "featuretools",
         "agg_primitives": ["count", "mean", "max", "min"]
     }
 )
 
-# Method 2: Use custom configuration object
-dfs_config = fastdfs.DFSConfig(
-    max_depth=3,
-    engine="featuretools",
-    agg_primitives=["count", "sum", "mean", "std"],
-    use_cutoff_time=True,
-    n_jobs=4
-)
-
-features_df = fastdfs.compute_dfs_features(
-    rdb=rdb,
-    target_dataframe=target_df,
-    key_mappings={"user_id": "user.user_id", "item_id": "item.item_id"},
-    cutoff_time_column="interaction_time",
-    config=dfs_config
-)
-
-# Apply transforms (simplified - no fit/transform)
-transforms = fastdfs.RDBTransformPipeline([
-    fastdfs.transforms.FeaturizeDatetime(methods=["year", "month", "hour"]), 
-    fastdfs.transforms.FilterColumn(drop_redundant=True),
-    fastdfs.transforms.HandleDummyTable()
+# Method 2: Pipeline with transforms
+transform_pipeline = RDBTransformPipeline([
+    HandleDummyTable(),
+    RDBTransformWrapper(FeaturizeDatetime(features=["year", "month", "hour"])),
+    RDBTransformWrapper(FilterColumn(drop_redundant=True))
 ])
-transformed_rdb = transforms(rdb)
 
-# Save results
-features_df.to_parquet("interactions_with_features.parquet")
-
-# Or use integrated pipeline class
 pipeline = fastdfs.DFSPipeline(
-    transform_pipeline=transforms,
-    dfs_config=dfs_config
+    transform_pipeline=transform_pipeline,
+    dfs_config=fastdfs.DFSConfig(max_depth=2, engine="featuretools")
 )
-result_df = pipeline.compute_features(
+
+features_df = pipeline.compute_features(
     rdb=rdb,
     target_dataframe=target_df,
     key_mappings={"user_id": "user.user_id", "item_id": "item.item_id"},

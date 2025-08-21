@@ -38,6 +38,7 @@ dependencies = [
     "numpy",
     "scipy",
     "scikit-learn",
+    "pyarrow",
     
     # DFS engines
     "featuretools",
