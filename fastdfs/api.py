@@ -10,7 +10,7 @@ import pandas as pd
 from pathlib import Path
 
 from .dfs import DFSConfig, get_dfs_engine
-from .dataset.rdb_simplified import RDBDataset
+from .dataset.rdb import RDBDataset
 
 __all__ = ['load_rdb', 'compute_dfs_features', 'DFSPipeline']
 

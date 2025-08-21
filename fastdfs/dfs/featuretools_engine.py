@@ -9,7 +9,7 @@ import tqdm
 from loguru import logger
 
 from .base_engine import DFSEngine, DFSConfig, dfs_engine
-from ..dataset.rdb_simplified import RDBDataset
+from ..dataset.rdb import RDBDataset
 
 __all__ = ['FeaturetoolsEngine']
 

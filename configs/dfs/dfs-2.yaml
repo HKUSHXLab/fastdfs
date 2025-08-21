@@ -1,3 +1,0 @@
-dfs:
-  max_depth : 2
-  use_cutoff_time : True

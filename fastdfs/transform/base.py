@@ -6,15 +6,11 @@ new simplified functional approach to data transformations in FastDFS.
 """
 
 import abc
-from typing import List, Dict, Optional, Tuple, Union, TYPE_CHECKING
+from typing import List, Dict, Optional, Tuple, Union
 import pandas as pd
 
-from ..dataset.meta import DBBColumnSchema
-from ..dataset.rdb_simplified import RDBTableSchema
-
-if TYPE_CHECKING:
-    from ..dataset.rdb_simplified import RDBDataset
-
+from ..dataset.meta import DBBColumnSchema, RDBTableSchema
+from ..dataset.rdb import RDBDataset
 
 class RDBTransform(abc.ABC):
     """Base class for RDB transformations - simplified composable operations."""

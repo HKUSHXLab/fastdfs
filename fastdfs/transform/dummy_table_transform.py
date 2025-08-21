@@ -8,8 +8,8 @@ in fastdfs/preprocess/transform/dummy_table.py.
 
 from typing import Dict, List, Set
 import pandas as pd
-from ..dataset.meta import DBBColumnSchema, DBBColumnDType  
-from ..dataset.rdb_simplified import RDBDataset, RDBTableSchema
+from ..dataset.meta import DBBColumnSchema, DBBColumnDType, RDBTableSchema
+from ..dataset.rdb import RDBDataset
 from .base import RDBTransform
 
 

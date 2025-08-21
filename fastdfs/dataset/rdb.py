@@ -6,62 +6,23 @@ the concept of "Tasks" and focuses purely on relational database tables for
 feature engineering.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
 
 from ..utils import yaml_utils
+from .loader import get_table_data_loader
 from .meta import (
+    RDBDatasetMeta,
+    RDBTableSchema,
     DBBColumnDType,
     DBBColumnSchema,
-    DBBTableSchema,
     DBBTableDataFormat,
 )
-from .loader import get_table_data_loader
 
-__all__ = ['RDBTableSchema', 'RDBDatasetMeta', 'RDBDataset']
-
-
-@dataclass
-class RDBTableSchema:
-    """Simplified table schema without task-specific metadata."""
-    name: str
-    source: str
-    format: DBBTableDataFormat
-    columns: List[DBBColumnSchema]
-    time_column: Optional[str] = None
-    
-    @property
-    def column_dict(self) -> Dict[str, DBBColumnSchema]:
-        """Get column schemas in a dictionary where the keys are column names."""
-        return {col_schema.name: col_schema for col_schema in self.columns}
-
-
-@dataclass  
-class RDBDatasetMeta:
-    """Simplified dataset metadata without tasks."""
-    dataset_name: str
-    tables: List[RDBTableSchema]
-    
-    @property
-    def relationships(self) -> List[Tuple[str, str, str, str]]:
-        """Get relationships as (child_table, child_col, parent_table, parent_col)."""
-        relationships = []
-        for table in self.tables:
-            for col in table.columns:
-                if col.dtype == DBBColumnDType.foreign_key:
-                    parent_table, parent_col = col.link_to.split('.')
-                    relationships.append((
-                        table.name,    # child table
-                        col.name,      # child column
-                        parent_table,  # parent table  
-                        parent_col     # parent column
-                    ))
-        return relationships
-
+__all__ = ['RDBDataset']
 
 class RDBDataset:
     """Simplified RDB dataset without tasks - focuses on relational tables only."""
@@ -236,7 +197,7 @@ class RDBDataset:
 def convert_task_dataset_to_rdb(old_dataset_path: Path, rdb_output_path: Path):
     """Convert old task-based dataset to new RDB-only format."""
     import shutil
-    from .rdb_dataset import DBBRDBDataset  # Import current implementation
+    from .legacy.rdb_dataset import DBBRDBDataset  # Import current implementation
     
     # Load old dataset
     old_dataset = DBBRDBDataset(old_dataset_path)
@@ -304,7 +265,7 @@ def convert_task_dataset_to_rdb(old_dataset_path: Path, rdb_output_path: Path):
 
 def extract_target_tables_from_tasks(old_dataset_path: Path, output_dir: Path):
     """Extract task data as separate target table files."""
-    from .rdb_dataset import DBBRDBDataset  # Import current implementation
+    from .legacy.rdb_dataset import DBBRDBDataset  # Import current implementation
     
     old_dataset = DBBRDBDataset(old_dataset_path)
     output_dir.mkdir(parents=True, exist_ok=True)

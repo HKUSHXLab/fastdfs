@@ -6,20 +6,17 @@ target dataframes and simplified RDB datasets, removing the dependency on tasks.
 """
 
 import abc
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
 import featuretools as ft
 import numpy as np
 from loguru import logger
 import pydantic
-from pathlib import Path
 
-from ..dataset.rdb_simplified import RDBDataset
+from ..dataset.rdb import RDBDataset
 from ..dataset.meta import DBBColumnDType, DBBColumnSchema
-from ..preprocess.dfs.core import parse_one_column, base_feature_is_key
 
 __all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine']
-
 
 class DFSConfig(pydantic.BaseModel):
     """
@@ -345,3 +342,49 @@ def get_dfs_engine(name: str, config: DFSConfig) -> DFSEngine:
     if name not in _DFS_ENGINE_REGISTRY:
         raise ValueError(f"Unknown DFS engine: {name}")
     return _DFS_ENGINE_REGISTRY[name](config)
+
+# Internal utilities
+
+def parse_one_column(
+    col_schema: DBBColumnSchema, col_data: np.ndarray
+) -> Tuple[pd.Series, str, str]:
+    if col_schema.dtype == DBBColumnDType.category_t:
+        series = pd.Series(col_data, copy=False)
+        log_ty = "Categorical"
+        tag = "category"
+    elif col_schema.dtype == DBBColumnDType.float_t:
+        if col_data.ndim > 1:
+            series = pd.Series(list(col_data))
+            log_ty = "Array"
+            tag = "array"
+        else:
+            series = pd.Series(col_data, copy=False)
+            log_ty = "Double"
+            tag = "numeric"
+    elif col_schema.dtype == DBBColumnDType.datetime_t:
+        series = pd.Series(col_data, copy=False)
+        log_ty = "Datetime"
+        tag = "string"
+    elif col_schema.dtype == DBBColumnDType.text_t:
+        series = pd.Series(col_data, copy=False)
+        log_ty = "Text"
+        tag = "text"
+    elif col_schema.dtype == DBBColumnDType.primary_key:
+        series = pd.Series(col_data, copy=False)
+        log_ty = "Categorical"
+        tag = "index"
+    elif col_schema.dtype == DBBColumnDType.foreign_key:
+        series = pd.Series(col_data, copy=False)
+        log_ty = "Categorical"
+        tag = "foreign_key"
+    else:
+        raise ValueError(f"Unsupported dtype {col_schema.dtype}.")
+    return series, log_ty, tag
+
+def base_feature_is_key(feature, keys):
+    if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature)):
+        return base_feature_is_key(feature.base_features[0], keys)
+    elif isinstance(feature, ft.IdentityFeature):
+        return (feature.dataframe_name, feature.get_name()) in keys
+    else:
+        raise NotImplementedError(f'Unsupported subfeature {feature}')

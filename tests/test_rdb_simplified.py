@@ -11,14 +11,11 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from fastdfs.dataset.rdb_simplified import (
+from fastdfs.dataset.rdb import (
     RDBDataset, 
-    RDBDatasetMeta, 
-    RDBTableSchema,
     convert_task_dataset_to_rdb,
     extract_target_tables_from_tasks
 )
-from fastdfs.dataset.rdb_dataset import DBBRDBDataset  # Current implementation
 from fastdfs.dataset.meta import DBBColumnDType, DBBTableDataFormat
 
 

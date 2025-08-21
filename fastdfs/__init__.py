@@ -16,7 +16,7 @@ from .api import (
 
 # Core components
 from .dfs import DFSConfig
-from .dataset.rdb_simplified import RDBDataset
+from .dataset.rdb import RDBDataset
 from .transform import (
     RDBTransform,
     RDBTransformPipeline,

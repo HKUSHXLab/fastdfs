@@ -8,8 +8,7 @@ fastdfs/utils/datetime_utils.py.
 
 from typing import List, Tuple
 import pandas as pd
-from ..dataset.meta import DBBColumnSchema, DBBColumnDType
-from ..dataset.rdb_simplified import RDBTableSchema
+from ..dataset.meta import DBBColumnSchema, DBBColumnDType, RDBTableSchema
 from ..utils.datetime_utils import featurize_datetime_column
 from .base import ColumnTransform
 

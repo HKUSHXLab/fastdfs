@@ -8,8 +8,7 @@ fastdfs/preprocess/transform/filter_column.py.
 
 from typing import List, Optional, Tuple
 import pandas as pd
-from ..dataset.meta import DBBColumnSchema, DBBColumnDType
-from ..dataset.rdb_simplified import RDBTableSchema
+from ..dataset.meta import RDBTableSchema, DBBColumnDType
 from .base import TableTransform
 
 

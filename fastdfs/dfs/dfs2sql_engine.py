@@ -7,14 +7,13 @@ from pathlib import Path
 import pandas as pd
 import featuretools as ft
 from sql_formatter.core import format_sql
-from functools import reduce
 import tqdm
 from loguru import logger
 
 from .base_engine import DFSEngine, DFSConfig, dfs_engine
-from ..dataset.rdb_simplified import RDBDataset
-from ..preprocess.dfs.gen_sqls import features2sql, decode_column_from_sql
-from ..preprocess.dfs.database import DuckDBBuilder
+from ..dataset.rdb import RDBDataset
+from .gen_sqls import features2sql, decode_column_from_sql
+from .duckdb_database import DuckDBBuilder
 
 __all__ = ['DFS2SQLEngine']
 

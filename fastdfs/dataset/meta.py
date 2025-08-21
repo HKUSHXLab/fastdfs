@@ -1,24 +1,15 @@
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pydantic
+from dataclasses import dataclass
 
 __all__ = [
-    "TIMESTAMP_FEATURE_NAME",
     "DBBColumnDType",
-    "DTYPE_EXTRA_FIELDS",
     "DBBColumnSchema",
     "DBBTableDataFormat",
-    "DBBTableSchema",
-    "DBBTaskType",
-    "TASK_EXTRA_FIELDS",
-    "DBBTaskEvalMetric",
-    "DBBTaskMeta",
-    "DBBColumnID",
-    "DBBRelationship",
-    "DBBRDBDatasetMeta",
+    "RDBTableSchema",
+    "RDBDatasetMeta"
 ]
-
-TIMESTAMP_FEATURE_NAME = '__timestamp__'
 
 class DBBColumnDType(str, Enum):
     """Column data type model."""
@@ -29,18 +20,6 @@ class DBBColumnDType(str, Enum):
     timestamp_t = 'timestamp'    # np.int64
     foreign_key = 'foreign_key'  # object
     primary_key = 'primary_key'  # object
-
-DTYPE_EXTRA_FIELDS = {
-    # in_size : An integer tells the size of the feature dimension.
-    DBBColumnDType.float_t : ["in_size"],
-    # num_categories : An integer tells the total number of categories.
-    DBBColumnDType.category_t : ["num_categories"],
-    # link_to : A string in the format of <TABLE>.<COLUMN>
-    # capacity : The number of unique keys.
-    DBBColumnDType.foreign_key : ["link_to", "capacity"],
-    # capacity : The number of unique keys.
-    DBBColumnDType.primary_key : ["capacity"],
-}
 
 class DBBColumnSchema(pydantic.BaseModel):
     """Column schema model.
@@ -54,122 +33,48 @@ class DBBColumnSchema(pydantic.BaseModel):
 
     # Column name.
     name : str
-    # Column data type. Optional when shared_schema is provided.
-    dtype : Optional[DBBColumnDType] = None
-    # Optional reference to a data table column this task column shares schema with.
-    # Format: "table_name.column_name"
-    shared_schema : Optional[str] = None
-    
-    @pydantic.root_validator
-    def validate_dtype_or_shared_schema(cls, values):
-        """Ensure dtype is provided either directly or via shared_schema."""
-        dtype = values.get('dtype')
-        shared_schema = values.get('shared_schema')
-        
-        if dtype is None and not shared_schema:
-            raise ValueError('dtype is required when shared_schema is not provided')
-        return values
+    # Column data type
+    dtype : DBBColumnDType
 
 class DBBTableDataFormat(str, Enum):
     PARQUET = 'parquet'
     NUMPY = 'numpy'
 
-class DBBTableSchema(pydantic.BaseModel):
-    """Table schema model."""
-
-    # Name of the table.
-    name : str
-    # On-disk data path (relative to the root data folder) to load this table.
+@dataclass
+class RDBTableSchema:
+    """Simplified table schema without task-specific metadata."""
+    name: str
     source: str
-    # On-disk format for storing this table.
     format: DBBTableDataFormat
-    # Column schemas.
     columns: List[DBBColumnSchema]
-    # Time column name.
-    time_column: Optional[str]
-
+    time_column: Optional[str] = None
+    
     @property
     def column_dict(self) -> Dict[str, DBBColumnSchema]:
         """Get column schemas in a dictionary where the keys are column names."""
-        return {col_schema.name : col_schema for col_schema in self.columns}
+        return {col_schema.name: col_schema for col_schema in self.columns}
 
-class DBBTaskType(str, Enum):
-    classification = 'classification'
-    regression = 'regression'
-    retrieval = 'retrieval'
 
-TASK_EXTRA_FIELDS = {
-    DBBTaskType.classification : ['num_classes'],
-    DBBTaskType.retrieval : [],
-    DBBTaskType.regression : [],
-}
-
-class DBBTaskEvalMetric(str, Enum):
-    auroc = 'auroc'
-    ap = 'ap'
-    accuracy = 'accuracy'
-    f1 = 'f1'
-    hinge = 'hinge'
-    recall = 'recall'
-    mae = 'mae'
-    mse = 'mse'
-    msle = 'msle'
-    pearson = 'pearson'
-    rmse = 'rmse'
-    r2 = 'r2'
-    mrr = 'mrr'
-    hr = 'hr'
-    ndcg = 'ndcg'
-    logloss = 'logloss'
-
-class DBBTaskMeta(pydantic.BaseModel):
-    class Config:
-        extra = pydantic.Extra.allow
-        use_enum_values = True
-
-    name : str
-    source : str
-    format : DBBTableDataFormat
-    columns : List[DBBColumnSchema]
-    time_column : Optional[str] = None
-
-    evaluation_metric : DBBTaskEvalMetric
-    target_column : str
-    task_type : Optional[DBBTaskType]
-
+@dataclass  
+class RDBDatasetMeta:
+    """Simplified dataset metadata without tasks."""
+    dataset_name: str
+    tables: List[RDBTableSchema]
+    
     @property
-    def column_dict(self) -> Dict[str, DBBColumnSchema]:
-        return {col_schema.name : col_schema for col_schema in self.columns}
-
-class DBBColumnID(pydantic.BaseModel):
-    table : str
-    column : str
-
-class DBBRelationship(pydantic.BaseModel):
-    fk : DBBColumnID
-    pk : DBBColumnID
-
-class DBBRDBDatasetMeta(pydantic.BaseModel):
-    """Dataset metadata model."""
-    # Dataset name.
-    dataset_name : str
-    # Table schemas.
-    tables : List[DBBTableSchema]
-    # Task metadata.
-    tasks : List[DBBTaskMeta]
-
-    @property
-    def relationships(self) -> List[DBBRelationship]:
-        """Get all relationships in a list."""
-        rels = []
+    def relationships(self) -> List[Tuple[str, str, str, str]]:
+        """Get relationships as (child_table, child_col, parent_table, parent_col)."""
+        relationships = []
         for table in self.tables:
             for col in table.columns:
                 if col.dtype == DBBColumnDType.foreign_key:
-                    link_tbl, link_col = col.link_to.split('.')
-                    fk = {'table' : table.name, 'column' : col.name}
-                    pk = {'table' : link_tbl, 'column' : link_col}
-                    rels.append(DBBRelationship.parse_obj({
-                        'fk' : fk, 'pk' : pk}))
-        return rels
+                    parent_table, parent_col = col.link_to.split('.')
+                    relationships.append((
+                        table.name,    # child table
+                        col.name,      # child column
+                        parent_table,  # parent table  
+                        parent_col     # parent column
+                    ))
+        return relationships
 
-    column_groups : Optional[List[List[DBBColumnID]]] = None
+

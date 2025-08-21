@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastdfs.dataset.meta import DBBColumnSchema, DBBColumnDType, DBBTableDataFormat
-from fastdfs.dataset.rdb_simplified import RDBDataset, RDBTableSchema, RDBDatasetMeta
+from fastdfs.dataset.rdb import RDBDataset, RDBTableSchema, RDBDatasetMeta
 from fastdfs.transform.base import RDBTransform, TableTransform, ColumnTransform
 from fastdfs.transform.datetime_transform import FeaturizeDatetime
 from fastdfs.transform.filter_transform import FilterColumn

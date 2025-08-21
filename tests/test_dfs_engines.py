@@ -11,7 +11,7 @@ import numpy as np
 from pathlib import Path
 
 from fastdfs.dfs import DFSConfig, get_dfs_engine, FeaturetoolsEngine, DFS2SQLEngine
-from fastdfs.dataset.rdb_simplified import RDBDataset
+from fastdfs.dataset.rdb import RDBDataset
 from fastdfs.api import load_rdb, compute_dfs_features, DFSPipeline
 
 

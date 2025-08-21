@@ -17,7 +17,7 @@ from sqlalchemy import (
     DateTime
 )
 
-from ..utils import yaml_utils
+from . import yaml_utils
 from .meta import (
     DBBTaskType,
     DBBTaskEvalMetric,
