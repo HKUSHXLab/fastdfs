@@ -115,16 +115,15 @@ class DFSEngine:
 
         original_index = target_dataframe.index
 
-        # Add default index to target dataframe before prepare_features
-        target_df_with_index = target_dataframe.copy()
         target_index = "__target_index__"
-        if target_index in target_df_with_index.columns:
+        if target_index in target_dataframe.columns:
             logger.error(f"Target dataframe cannot contain reserved column name '{target_index}'.")
-        target_df_with_index[target_index] = range(len(target_df_with_index))
+        # Assign creates a new dataframe but reuses underlying blocks where possible.
+        target_df_with_index = target_dataframe.assign(
+            **{target_index: np.arange(len(target_dataframe))}
+        )
 
-        # Create a working copy for engine-specific preparation steps so that
-        # featuretools/woodwork mutations do not affect the merge copy that
-        # preserves the original target order.
+        # Work on a defensive copy that engines are free to mutate.
         target_df_for_engine = target_df_with_index.copy()
 
         # Phase 1: Feature preparation (common logic in base class)
@@ -138,9 +137,6 @@ class DFSEngine:
         feature_matrix = self.compute_feature_matrix(
             rdb, target_df_for_engine, key_mappings, cutoff_time_column, features, config
         )
-
-        if len(feature_matrix.columns) != len(features):
-            logger.error("Feature matrix column count does not match prepared features.")
 
         if target_index not in feature_matrix.columns:
             logger.error("Feature matrix is missing the target index column '__target_index__'.")

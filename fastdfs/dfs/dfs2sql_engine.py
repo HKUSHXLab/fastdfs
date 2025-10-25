@@ -34,7 +34,6 @@ class DFS2SQLEngine(DFSEngine):
         config: DFSConfig
     ) -> pd.DataFrame:
         """Compute feature values using SQL generation (reuse existing computation logic)."""
-
         # Set up database with RDB tables + target table
         target_index = "__target_index__"  # Target index is already handled by base class
         builder = DuckDBBuilder(Path(config.engine_path))
@@ -128,7 +127,7 @@ class DFS2SQLEngine(DFSEngine):
             )
 
         # Add target dataframe as __target__ table (target_index is already in dataframe)
-        target_df_for_db = target_dataframe.copy()
+        target_df_for_db = target_dataframe
 
         builder.add_dataframe(
             dataframe_name="__target__",
