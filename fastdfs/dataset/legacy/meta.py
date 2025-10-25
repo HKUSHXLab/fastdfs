@@ -59,8 +59,8 @@ class DBBColumnSchema(pydantic.BaseModel):
     # Optional reference to a data table column this task column shares schema with.
     # Format: "table_name.column_name"
     shared_schema : Optional[str] = None
-    
-    @pydantic.root_validator
+
+    @pydantic.model_validator(mode='before')
     def validate_dtype_or_shared_schema(cls, values):
         """Ensure dtype is provided either directly or via shared_schema."""
         dtype = values.get('dtype')
