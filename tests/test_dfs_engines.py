@@ -383,6 +383,52 @@ class TestEngineComparison:
 
         print(f"✓ Both engines produced {len(ft_feature_cols)} equivalent features with cutoff time")
 
+    @pytest.mark.parametrize("engine_name", ["featuretools", "dfs2sql"])
+    @pytest.mark.parametrize("use_cutoff_time", [True, False])
+    @pytest.mark.parametrize("max_depth", [1, 2])
+    def test_target_dataframe_row_order_is_preserved(self, rdb_dataset, target_dataframe, key_mappings, engine_name, use_cutoff_time, max_depth):
+        """Test that the row order of the target dataframe is preserved after DFS across different configs."""
+        # Shuffle the target dataframe to create a non-default order
+        shuffled_target_df = target_dataframe.sample(frac=1, random_state=42).reset_index(drop=True)
+
+        config = DFSConfig(
+            engine=engine_name,
+            max_depth=max_depth,
+            agg_primitives=["count", "max", "mean"],
+            use_cutoff_time=use_cutoff_time
+        )
+
+        engine = get_dfs_engine(engine_name, config)
+
+        result_df = engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=shuffled_target_df,
+            key_mappings=key_mappings,
+            cutoff_time_column="interaction_time" if use_cutoff_time else None
+        )
+
+        # The original columns in the result should have the exact same order and values
+        # as the shuffled input dataframe.
+        original_cols = shuffled_target_df.columns
+
+        # Make a copy to avoid modifying the original dataframes
+        left = result_df[original_cols].copy()
+        right = shuffled_target_df.copy()
+
+        # Convert key columns to string to handle dtype differences (e.g., categorical vs object)
+        for col in key_mappings.keys():
+            if col in left.columns and col in right.columns:
+                left[col] = left[col].astype(str)
+                right[col] = right[col].astype(str)
+
+        # Reset index on both to ensure we are comparing values in order, not by index.
+        left = left.reset_index(drop=True)
+        right = right.reset_index(drop=True)
+
+        pd.testing.assert_frame_equal(left, right, check_dtype=False)
+
+        print(f"✓ Row order preserved for engine={engine_name}, cutoff={use_cutoff_time}, depth={max_depth}")
+
 
 class TestHighLevelAPI:
     """Test the high-level API functions."""

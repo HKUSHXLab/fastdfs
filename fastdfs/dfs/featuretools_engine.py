@@ -37,7 +37,7 @@ class FeaturetoolsEngine(DFSEngine):
         target_index = "__target_index__"  # Target index is already handled by base class
         
         # Handle cutoff time processing
-        target_df_copy = target_dataframe.copy(deep=False)
+        target_df_copy = target_dataframe.copy()
         cutoff_times = None
         
         if cutoff_time_column and config.use_cutoff_time:
@@ -75,21 +75,14 @@ class FeaturetoolsEngine(DFSEngine):
                 progress_callback=_cb
             )
         
-        # Reset index to get target_index as a column for sorting
+        # Ensure target index is a column in the returned feature matrix
         if target_index in feature_matrix.index.names or target_index == feature_matrix.index.name:
             feature_matrix = feature_matrix.reset_index()
         elif target_index not in feature_matrix.columns:
-            # Add the target index column if somehow missing
             feature_matrix[target_index] = range(len(feature_matrix))
-        
-        # Sort by target index to ensure consistent row order
-        feature_matrix = feature_matrix.sort_values(by=target_index).reset_index(drop=True)
-        
-        # Since both dataframes are sorted by target_index, we can concatenate along column axis
-        # First drop target_index from feature_matrix to avoid duplication
-        feature_columns = feature_matrix.drop(columns=[target_index])
-        
-        # Concatenate along column axis (axis=1)
-        result = pd.concat([target_dataframe, feature_columns], axis=1)
-        
-        return result
+
+        # Drop any columns that originate from the target dataframe (besides the index helper)
+        columns_to_exclude = set(target_dataframe.columns) - {target_index}
+        feature_columns = [col for col in feature_matrix.columns if col not in columns_to_exclude]
+
+        return feature_matrix[feature_columns]
