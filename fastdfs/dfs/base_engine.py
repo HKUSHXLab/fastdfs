@@ -113,14 +113,21 @@ class DFSEngine:
         if len(target_dataframe) == 0:
             return target_dataframe
 
-        # Add default index to target dataframe before prepare_features
-        target_df_with_index = target_dataframe.copy(deep=False)
+        original_index = target_dataframe.index
+
         target_index = "__target_index__"
-        if target_index not in target_df_with_index.columns:
-            target_df_with_index[target_index] = range(len(target_df_with_index))
+        if target_index in target_dataframe.columns:
+            logger.error(f"Target dataframe cannot contain reserved column name '{target_index}'.")
+        # Assign creates a new dataframe but reuses underlying blocks where possible.
+        target_df_with_index = target_dataframe.assign(
+            **{target_index: np.arange(len(target_dataframe))}
+        )
+
+        # Work on a defensive copy that engines are free to mutate.
+        target_df_for_engine = target_df_with_index.copy()
 
         # Phase 1: Feature preparation (common logic in base class)
-        features = self.prepare_features(rdb, target_df_with_index, key_mappings, cutoff_time_column, config)
+        features = self.prepare_features(rdb, target_df_for_engine, key_mappings, cutoff_time_column, config)
 
         if len(features) == 0:
             logger.warning("No features generated, check your configuration or data.")
@@ -128,14 +135,22 @@ class DFSEngine:
 
         # Phase 2: Feature computation (engine-specific logic in subclasses)
         feature_matrix = self.compute_feature_matrix(
-            rdb, target_df_with_index, key_mappings, cutoff_time_column, features, config
+            rdb, target_df_for_engine, key_mappings, cutoff_time_column, features, config
         )
 
-        # Remove the temporary index column from the result
-        if target_index in feature_matrix.columns:
-            feature_matrix = feature_matrix.drop(columns=[target_index])
+        if target_index not in feature_matrix.columns:
+            logger.error("Feature matrix is missing the target index column '__target_index__'.")
 
-        return feature_matrix
+        # Align features with original target rows using the target index
+        target_with_idx = target_df_with_index.set_index(target_index)
+        features_with_idx = feature_matrix.set_index(target_index)
+
+        merged = target_with_idx.join(features_with_idx, how="left")
+
+        # Restore the original index ordering
+        merged.index = original_index
+
+        return merged
 
     def prepare_features(
         self,

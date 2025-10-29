@@ -34,7 +34,6 @@ class DFS2SQLEngine(DFSEngine):
         config: DFSConfig
     ) -> pd.DataFrame:
         """Compute feature values using SQL generation (reuse existing computation logic)."""
-
         # Set up database with RDB tables + target table
         target_index = "__target_index__"  # Target index is already handled by base class
         builder = DuckDBBuilder(Path(config.engine_path))
@@ -81,25 +80,20 @@ class DFS2SQLEngine(DFSEngine):
         # Merge all feature dataframes
         if dataframes:
             logger.debug("Finalizing ...")
-            # Instead of using reduce, merge iteratively and maintain order
             merged_df = dataframes[0]
             for df in dataframes[1:]:
-                # Merge preserving the order of the left dataframe (merged_df)
                 merged_df = pd.merge(merged_df, df, on=target_index, how='left')
 
-            # Sort both dataframes by target index to ensure consistent row order
             merged_df = merged_df.sort_values(by=target_index).reset_index(drop=True)
 
-            # Since both dataframes are sorted by target_index, we can concatenate along column axis
-            # First drop target_index from merged_df to avoid duplication
-            feature_columns = merged_df.drop(columns=[target_index])
-            
-            # Concatenate along column axis (axis=1)
-            result = pd.concat([target_dataframe, feature_columns], axis=1)
+            columns_to_exclude = set(target_dataframe.columns) - {target_index}
+            feature_columns = [col for col in merged_df.columns if col not in columns_to_exclude]
 
-            return result
+            return merged_df[feature_columns]
         else:
-            return target_dataframe
+            # No features generated
+            logger.warning("No features generated from SQL execution.")
+            return None
 
     def _build_database_tables(
         self,
@@ -133,7 +127,7 @@ class DFS2SQLEngine(DFSEngine):
             )
 
         # Add target dataframe as __target__ table (target_index is already in dataframe)
-        target_df_for_db = target_dataframe.copy(deep=False)
+        target_df_for_db = target_dataframe
 
         builder.add_dataframe(
             dataframe_name="__target__",
