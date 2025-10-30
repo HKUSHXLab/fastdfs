@@ -1,0 +1,24 @@
+dataset_name: example4_cutoff_time
+tables:
+- columns:
+  - dtype: primary_key
+    name: user_id
+  - dtype: float
+    name: age
+  format: numpy
+  name: user
+  source: data/user.npz
+- columns:
+  - dtype: primary_key
+    name: transaction_id
+  - dtype: foreign_key
+    link_to: user.user_id
+    name: user_id
+  - dtype: float
+    name: amount
+  - dtype: datetime
+    name: timestamp
+  format: numpy
+  name: transaction
+  source: data/transaction.npz
+  time_column: timestamp
