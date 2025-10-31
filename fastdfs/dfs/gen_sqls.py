@@ -381,6 +381,11 @@ class FeatureBlock:
         elif self._group_by_primitive.name == "join":
             return Anonymous(this="string_agg", expressions=[source_column, "'\n'"])
         else:
+            # Map primitives to backend-specific function names (DuckDB)
+            # Use sample standard deviation to match pandas/featuretools default semantics (ddof=1)
+            func_name = (
+                "stddev_samp" if self._group_by_primitive.name == "std" else self._group_by_primitive.name
+            )
             return Anonymous(
                 this=self._group_by_primitive.name, expressions=[source_column]
             )

@@ -158,10 +158,10 @@ golden_data = {
     "item.category": np.array(['Electronics', 'Electronics', 'Books'], dtype=object),
     "user.COUNT(interaction)": np.array([1, 3, 1], dtype=np.int64),
     "user.MEAN(interaction.rating)": np.array([4.5, 4.0, 5.0], dtype=np.float32),
-    "user.STD(interaction.rating)": np.array([np.nan, 0.0, np.nan], dtype=np.float32),
+    "user.STD(interaction.rating)": np.array([np.nan, 0.5, np.nan], dtype=np.float32),
     "item.COUNT(interaction)": np.array([1, 2, 2], dtype=np.int64),
-    "item.MEAN(interaction.rating)": np.array([4.5, 4.0, 4.5], dtype=np.float32),
-    "item.STD(interaction.rating)": np.array([np.nan, 0.0, 0.70710677], dtype=np.float32),
+    "item.MEAN(interaction.rating)": np.array([4.5, 4.25, 4.25], dtype=np.float32),
+    "item.STD(interaction.rating)": np.array([np.nan, 0.353553, 1.060660], dtype=np.float32),
 }
 
 data_dir = example_dir / "data"

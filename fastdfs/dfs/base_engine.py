@@ -396,10 +396,64 @@ def parse_one_column(
         raise ValueError(f"Unsupported dtype {col_schema.dtype}.")
     return series, log_ty, tag
 
+def get_primitive_name(feature):
+    """Extract primitive name from an AggregationFeature."""
+    if isinstance(feature, ft.AggregationFeature):
+        primitive = feature.primitive
+        if hasattr(primitive, 'name'):
+            return primitive.name.lower()
+        elif hasattr(primitive, '__name__'):
+            return primitive.__name__.lower()
+        elif isinstance(primitive, str):
+            return primitive.lower()
+    return None
+
 def base_feature_is_key(feature, keys):
+    """
+    Check if a feature's base feature is a key (primary/foreign key).
+    
+    Exception: COUNT over an entity is valid even if it uses keys internally,
+    because it counts records (rows), not aggregating key values.
+    
+    For COUNT(entity), the structure is:
+    - AggregationFeature(COUNT) -> IdentityFeature(entity.index)
+    - This counts rows, not key values, so it's valid and should NOT be filtered.
+    """
+    # Special case: COUNT over entire entity (not aggregating a key column value)
+    # COUNT(entity) uses the entity's index (a key) for grouping, but counts rows
+    if isinstance(feature, ft.AggregationFeature):
+        if get_primitive_name(feature) == 'count':
+            # COUNT over entity: base is IdentityFeature of entity's index
+            if feature.base_features:
+                base = feature.base_features[0]
+                if isinstance(base, ft.IdentityFeature):
+                    # This is COUNT(entity) - counts rows, not key values
+                    # Even though it uses a key internally, it's valid
+                    return False
+    
+    # For DirectFeature wrapping COUNT(entity), also allow it
+    if isinstance(feature, ft.DirectFeature):
+        if feature.base_features:
+            base = feature.base_features[0]
+            # Check if base is COUNT over entity
+            if isinstance(base, ft.AggregationFeature):
+                if get_primitive_name(base) == 'count':
+                    if base.base_features:
+                        agg_base = base.base_features[0]
+                        if isinstance(agg_base, ft.IdentityFeature):
+                            # COUNT over entity - don't filter
+                            return False
+            # Otherwise check recursively
+            return base_feature_is_key(base, keys)
+    
+    # Original logic: recursively check base features
     if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature)):
-        return base_feature_is_key(feature.base_features[0], keys)
+        if feature.base_features:
+            return base_feature_is_key(feature.base_features[0], keys)
+    
+    # Check if IdentityFeature is a key
     elif isinstance(feature, ft.IdentityFeature):
         return (feature.dataframe_name, feature.get_name()) in keys
+    
     else:
         raise NotImplementedError(f'Unsupported subfeature {feature}')
