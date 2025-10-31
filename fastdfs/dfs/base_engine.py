@@ -262,7 +262,12 @@ class DFSEngine:
             )
 
         # Add relationships between RDB tables
+        # Skip self-referential relationships to avoid recursion errors
         for child_table, child_col, parent_table, parent_col in rdb.get_relationships():
+            # Skip self-referential relationships (e.g., posts.ParentId -> posts.Id)
+            if child_table == parent_table:
+                logger.warning(f"Skipping self-referential relationship: {child_table}.{child_col} -> {parent_table}.{parent_col}")
+                continue
             entity_set = entity_set.add_relationship(
                 parent_dataframe_name=parent_table,
                 parent_column_name=parent_col,
