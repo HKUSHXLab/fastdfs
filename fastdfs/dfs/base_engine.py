@@ -177,9 +177,12 @@ class DFSEngine:
         target_entity_name = "__target__"
         target_index = "__target_index__"  # This should already be in the dataframe
 
+        # Clean dataframe to handle problematic columns (arrays, lists, etc.)
+        cleaned_df = self._clean_target_dataframe(target_dataframe)
+
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
-            dataframe=target_dataframe,
+            dataframe=cleaned_df,
             index=target_index,
             time_index=cutoff_time_column
         )
@@ -291,6 +294,33 @@ class DFSEngine:
             # Only support basic primitives, no array types
             primitives.append(prim)
         return primitives
+
+    def _clean_target_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean target dataframe to handle problematic columns that woodwork can't process.
+        
+        Removes columns that contain arrays, lists, or other complex types that cause
+        issues during logical type inference.
+        """
+        cleaned_df = df.copy()
+        columns_to_drop = []
+        
+        for col in cleaned_df.columns:
+            # Check if column contains arrays/lists or other non-scalar values
+            if cleaned_df[col].dtype == 'object':
+                # Check first non-null value to see if it's an array/list
+                sample = cleaned_df[col].dropna()
+                if len(sample) > 0:
+                    first_val = sample.iloc[0]
+                    if isinstance(first_val, (list, np.ndarray, tuple)) or str(type(first_val)).startswith('<class'):
+                        columns_to_drop.append(col)
+                        logger.warning(f"Dropping problematic column '{col}' containing non-scalar values")
+        
+        # Drop problematic columns
+        if columns_to_drop:
+            cleaned_df = cleaned_df.drop(columns=columns_to_drop)
+            logger.info(f"Dropped {len(columns_to_drop)} problematic columns: {columns_to_drop}")
+        
+        return cleaned_df
 
     def _filter_features(
         self,
