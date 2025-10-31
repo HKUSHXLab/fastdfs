@@ -2,7 +2,7 @@
 SQL-based DFS engine implementation for the new interface.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 import pandas as pd
 import featuretools as ft
@@ -51,6 +51,9 @@ class DFS2SQLEngine(DFSEngine):
             cutoff_time_table_name = None
             cutoff_time_col_name = None
 
+        # Build column type map from RDB tables for boolean detection
+        column_type_map = self._build_column_type_map(rdb, target_dataframe)
+
         sqls = features2sql(
             features,
             target_index,
@@ -58,6 +61,7 @@ class DFS2SQLEngine(DFSEngine):
             cutoff_time_table_name=cutoff_time_table_name,
             cutoff_time_col_name=cutoff_time_col_name,
             time_col_mapping=time_columns,
+            column_type_map=column_type_map,
         )
 
         # Execute SQLs and merge results (reuse existing logic)
@@ -153,3 +157,25 @@ class DFS2SQLEngine(DFSEngine):
                 return col_schema.name
         # If no primary key, create default index
         return "__index__"
+
+    def _build_column_type_map(self, rdb: RDBDataset, target_dataframe: pd.DataFrame) -> Dict[Tuple[str, str], str]:
+        """Build a mapping from (table_name, column_name) to dtype string for boolean detection.
+        
+        Returns:
+            Dictionary mapping (table_name, column_name) tuples to dtype strings
+        """
+        column_type_map = {}
+        
+        # Add RDB table columns
+        for table_name in rdb.table_names:
+            df = rdb.get_table(table_name)
+            for col_name in df.columns:
+                dtype_str = str(df[col_name].dtype)
+                column_type_map[(table_name, col_name)] = dtype_str
+        
+        # Add target dataframe columns
+        for col_name in target_dataframe.columns:
+            dtype_str = str(target_dataframe[col_name].dtype)
+            column_type_map[("__target__", col_name)] = dtype_str
+        
+        return column_type_map

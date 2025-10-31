@@ -15,6 +15,7 @@ from sqlglot.expressions import (
     Coalesce,
     Select,
     Identifier,
+    Cast,
 )
 import sqlglot
 from collections import defaultdict
@@ -64,6 +65,7 @@ class FeatureBlock:
         ] = None,
         is_first: Optional[bool] = False,
         index_col: Optional[str] = None,
+        column_type_map: Optional[Dict[Tuple[str, str], str]] = None,
     ):
         """
         1. initialize the info from ft.Feature
@@ -81,6 +83,7 @@ class FeatureBlock:
         self._skip_backward_relationships = skip_backward_relationships
         self._index_col = index_col
         self._use_cutoff_time = False
+        self._column_type_map = column_type_map or {}
         self._build()
 
         if group_by_primitive is None and self._child is not None:
@@ -115,6 +118,7 @@ class FeatureBlock:
                 generated_column_name=child_generated_column_name,
                 skip_backward_relationships=child_skip_backward_relationships,
                 is_first=False,
+                column_type_map=self._column_type_map,
             )
         """
             3.get alias table name after building child featureblock
@@ -374,18 +378,89 @@ class FeatureBlock:
             ast = ast.group_by(group_by_cond)
         return ast
 
+    def _get_base_identity_feature(self, feature):
+        """Recursively find the base IdentityFeature from a feature.
+        
+        Args:
+            feature: A featuretools Feature object
+            
+        Returns:
+            The base IdentityFeature, or None if not found
+        """
+        # If it's an IdentityFeature, we've found it
+        if isinstance(feature, ft.IdentityFeature):
+            return feature
+        
+        # If it's an AggregationFeature or DirectFeature, check base features
+        if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature)):
+            if hasattr(feature, 'base_features') and len(feature.base_features) > 0:
+                return self._get_base_identity_feature(feature.base_features[0])
+        
+        return None
+
+    def _is_source_feature_boolean(self) -> bool:
+        """Check if the source feature being aggregated is boolean type.
+        
+        Returns:
+            True if the source feature has boolean variable_type, False otherwise.
+        """
+        # Get the source feature being aggregated
+        if self._child is not None:
+            # If there's a child, the source feature is the child feature
+            source_feature = self._child._feature
+        else:
+            # If no child, the source feature is the base feature
+            if len(self._feature.base_features) > 0:
+                source_feature = self._feature.base_features[0]
+            else:
+                # Direct feature - check the feature itself
+                source_feature = self._feature
+        
+        # Try to find the base IdentityFeature for more reliable type checking
+        base_identity = self._get_base_identity_feature(source_feature)
+        if base_identity is not None:
+            source_feature = base_identity
+        
+        # Method 0: Check column type map (most reliable if available)
+        if hasattr(source_feature, 'dataframe_name') and hasattr(source_feature, 'get_name'):
+            dataframe_name = source_feature.dataframe_name
+            column_name = source_feature.get_name()
+            key = (dataframe_name, column_name)
+            if key in self._column_type_map:
+                dtype_str = str(self._column_type_map[key]).lower()
+                # Check for boolean dtypes
+                if 'bool' in dtype_str or dtype_str in ['boolean', 'bool']:
+                    return True
+
+        return False
+
     def handle_agg(self, source_column) -> Anonymous:
+        # Aggregations that require numeric types (don't work with boolean in DuckDB)
+        numeric_only_primitives = ["mean", "std", "sum"]
+        
         array_agg_func_names = ["arraymax", "arraymin", "arraymean"]
         if self._group_by_primitive.name in array_agg_func_names:
             return Anonymous(this="array_agg", expressions=[source_column])
         elif self._group_by_primitive.name == "join":
             return Anonymous(this="string_agg", expressions=[source_column, "'\n'"])
-        else:
+        elif self._group_by_primitive.name in numeric_only_primitives:
+            # Only cast boolean to integer for numeric aggregations
+            # Check if source feature is boolean before casting
+            if self._is_source_feature_boolean():
+                cast_expression = Cast(
+                    this=source_column,
+                    to=Identifier(this="INTEGER", quoted=False)
+                )
+            else:
+                # If not boolean, use the source column directly
+                cast_expression = source_column
             # Map primitives to backend-specific function names (DuckDB)
             # Use sample standard deviation to match pandas/featuretools default semantics (ddof=1)
             func_name = (
                 "stddev_samp" if self._group_by_primitive.name == "std" else self._group_by_primitive.name
             )
+            return Anonymous(this=func_name, expressions=[cast_expression])
+        else:
             return Anonymous(
                 this=self._group_by_primitive.name, expressions=[source_column]
             )
@@ -612,6 +687,7 @@ def features2sql(
     cutoff_time_table_name: str,
     cutoff_time_col_name: str,
     time_col_mapping: Dict[str, str],
+    column_type_map: Optional[Dict[Tuple[str, str], str]] = None,
 ) -> List[Select]:
     if has_cutoff_time:
         target_table = features[0].dataframe_name
@@ -628,6 +704,7 @@ def features2sql(
                 generated_column_name=encode_column_for_sql(f.get_name()),
                 is_first=True,
                 index_col=index_name,
+                column_type_map=column_type_map,
             )
             if feature_block.has_skip_backward_relationships():
                 logger.warning(
@@ -665,6 +742,7 @@ def features2sql(
             generated_column_name=encode_column_for_sql(f.get_name()),
             is_first=True,
             index_col=index_name,
+            column_type_map=column_type_map,
         )
         sql = feature_block.gen_sql()
         logger.debug(f"Generated SQL for {f.get_name()}: \n" f"{format_sql(sql.sql())}")
