@@ -117,12 +117,12 @@ print(f"With features: {len(features.columns)}")
 
 ```python
 # Apply preprocessing transforms before feature generation
-from fastdfs.transform import RDBTransformPipeline, HandleDummyTable, FeaturizeDatetime
+from fastdfs.transform import RDBTransformWrapper, RDBTransformPipeline, HandleDummyTable, FeaturizeDatetime
 
 pipeline = fastdfs.DFSPipeline(
     transform_pipeline=RDBTransformPipeline([
         HandleDummyTable(),
-        FeaturizeDatetime(features=["year", "month", "hour"])
+        RDBTransformWrapper(FeaturizeDatetime(features=["year", "month", "hour"]))
     ]),
     dfs_config=fastdfs.DFSConfig(max_depth=3, engine="dfs2sql")
 )
