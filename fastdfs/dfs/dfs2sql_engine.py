@@ -14,6 +14,7 @@ from .base_engine import DFSEngine, DFSConfig, dfs_engine
 from ..dataset.rdb import RDBDataset
 from .gen_sqls import features2sql, decode_column_from_sql
 from .duckdb_database import DuckDBBuilder
+from ..dataset.meta import RDBCutoffTimeColumn
 
 __all__ = ['DFS2SQLEngine']
 
@@ -147,7 +148,7 @@ class DFS2SQLEngine(DFSEngine):
         if cutoff_time_column:
             # Create cutoff time dataframe with only necessary columns
             cutoff_time = target_df_for_db[[target_index, cutoff_time_column]]
-            cutoff_time.columns = [target_index, "time"]
+            cutoff_time.columns = [target_index, RDBCutoffTimeColumn.column_name]
             builder.set_cutoff_time(cutoff_time)
 
     def _get_table_index(self, table_meta) -> str:
