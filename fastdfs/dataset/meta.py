@@ -21,6 +21,11 @@ class RDBColumnDType(str, Enum):
     foreign_key = 'foreign_key'  # object
     primary_key = 'primary_key'  # object
 
+class RDBCutoffTime(str, Enum):
+    """Column data type model."""
+    column_name = "__time_for_cutoff__"
+    table_name = "__cutoff_time__"
+
 class RDBColumnSchema(BaseModel):
     """Column schema model.
 
