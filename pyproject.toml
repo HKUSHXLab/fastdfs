@@ -48,7 +48,7 @@ dependencies = [
     "sql_formatter",
     
     # Configuration and CLI
-    "pydantic==1.10.12",
+    "pydantic",
     "pyyaml",
     "typer",
     "tqdm",
