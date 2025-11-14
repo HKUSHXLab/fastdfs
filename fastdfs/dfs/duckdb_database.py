@@ -5,7 +5,7 @@ import os
 import pandas as pd
 
 import duckdb
-from ..dataset.meta import RDBCutoffTimeColumn
+from ..dataset.meta import RDBCutoffTime
 
 class DuckDBBuilder:
     def __init__(self, path : Path):
@@ -45,9 +45,9 @@ class DuckDBBuilder:
     ):
         if cutoff_time is None:
             return
-        assert RDBCutoffTimeColumn.column_name in cutoff_time.columns
-        self.cutoff_time_col_name = RDBCutoffTimeColumn.column_name
-        self.cutoff_time_table_name = RDBCutoffTimeColumn.table_name
+        assert RDBCutoffTime.column_name in cutoff_time.columns
+        self.cutoff_time_col_name = RDBCutoffTime.column_name
+        self.cutoff_time_table_name = RDBCutoffTime.table_name
         self.db.sql(f"CREATE TABLE {self.cutoff_time_table_name} AS SELECT * from cutoff_time")
         self.cutoff_time = cutoff_time
 
