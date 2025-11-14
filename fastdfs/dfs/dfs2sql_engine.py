@@ -148,7 +148,7 @@ class DFS2SQLEngine(DFSEngine):
         if cutoff_time_column:
             # Create cutoff time dataframe with only necessary columns
             cutoff_time = target_df_for_db[[target_index, cutoff_time_column]]
-            cutoff_time.columns = [target_index, RDBCutoffTime.column_name]
+            cutoff_time.columns = [target_index, RDBCutoffTime.column_name.value]
             builder.set_cutoff_time(cutoff_time)
 
     def _get_table_index(self, table_meta) -> str:
