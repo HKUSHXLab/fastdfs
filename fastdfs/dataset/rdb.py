@@ -11,6 +11,9 @@ from typing import Dict, List, Tuple
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
+import numpy as np
+import pandas as pd
+from collections import Counter
 
 from ..utils import yaml_utils
 from .loader import get_table_data_loader
@@ -81,9 +84,72 @@ class RDBDataset:
                         f"Column {col_schema.name} not found in table {table_schema.name}"
                     )
                 df_data[col_schema.name] = table_data[col_schema.name]
-            
-            tables[table_schema.name] = pd.DataFrame(df_data)
-        
+
+            df_table = pd.DataFrame(df_data)
+
+            # Identify columns where every element is a list/array of strings
+            columns_to_expand = []
+            for col in df_table.columns:
+                s = df_table[col]
+                # Check that all non-null, non-empty elements are lists/arrays of strings
+                def is_list_of_str(x):
+                    if isinstance(x, (list, np.ndarray)) and len(x) > 0:
+                        return all(isinstance(xx, str) for xx in x)
+                    return False
+                if s.map(is_list_of_str).any():
+                    # Only mark if at least one cell is a non-empty list of strings; skip if never true
+                    columns_to_expand.append(col)
+
+            # print(f"columns_to_expand: {columns_to_expand}")
+            for col in columns_to_expand:
+                s = df_table[col]
+
+                # Get all strings from all lists in this column
+                flattened = [ss for arr in s if isinstance(arr, (list, np.ndarray)) for ss in arr if isinstance(ss, str)]
+                N_top = 40
+                topN_words = [w for w,_ in Counter(flattened).most_common(N_top)]
+
+                # For each row, create new features for each top20 word and for [other]
+                def expand_row(arr):
+                    result = []
+                    if not isinstance(arr, (list, np.ndarray)):
+                        arr = []
+                    arr = [a for a in arr if isinstance(a, str)]
+                    arr_set = set(arr)
+                    present = [1 if t in arr_set else 0 for t in topN_words]
+                    # [other] is the count of strings NOT in top20
+                    other = sum((a not in topN_words) for a in arr_set)
+                    return present + [other]
+
+                expanded = s.apply(expand_row)
+
+                # expanded is a series of lists of length 21
+                expanded_matrix = np.vstack(expanded.values)
+
+                # Create new columns
+                for idx, string in enumerate(topN_words):
+                    df_table[f"{col}-[{string}]"] = expanded_matrix[:, idx]
+                df_table[f"{col}-[other]"] = expanded_matrix[:, -1]
+                print(f"df_table: {df_table.head()}")
+                # Drop original column
+                df_table = df_table.drop(columns=[col])
+                # Also drop the corresponding RDBColumnSchema from table_schema.columns
+                table_schema.columns = [
+                    c for c in table_schema.columns if c.name != col
+                ]
+                # INSERT_YOUR_CODE
+                # Add new RDBColumnSchema for each new column
+                for idx, string in enumerate(topN_words):
+                    table_schema.columns.append(
+                        type(table_schema.columns[0])(name=f"{col}-[{string}]", dtype="float")
+                    )
+                table_schema.columns.append(
+                    type(table_schema.columns[0])(name=f"{col}-[other]", dtype="float")
+                )
+
+            #     print(f"table schema: {table_schema}")
+            tables[table_schema.name] = df_table
+
         return tables
     
     @property
