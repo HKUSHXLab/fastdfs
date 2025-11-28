@@ -48,8 +48,12 @@ class HandleDummyTable(RDBTransform):
             new_metadata=new_metadata
         )
     
-    def _collect_foreign_key_references(self, dataset: RDBDataset, relationships: List) -> Dict[str, Set[str]]:
-        """Collect all foreign key column references and their target tables."""
+    def _collect_foreign_key_references(self, dataset: RDBDataset, relationships: List) -> Dict[str, Dict[str, Set]]:
+        """Collect all foreign key column references and their target tables.
+        
+        Returns:
+            Dict mapping pk_table -> {'pk_col': str, 'fk_refs': [(fk_table, fk_col), ...]}
+        """
         fk_refs = {}
         
         # Process relationships to understand foreign key structure
@@ -57,30 +61,32 @@ class HandleDummyTable(RDBTransform):
             if isinstance(relationship, tuple) and len(relationship) == 4:
                 fk_table, fk_col, pk_table, pk_col = relationship
                 if pk_table not in fk_refs:
-                    fk_refs[pk_table] = set()
+                    fk_refs[pk_table] = {
+                        'pk_col': pk_col,
+                        'fk_refs': []
+                    }
+                # Store the FK table and column that references this PK
+                fk_refs[pk_table]['fk_refs'].append((fk_table, fk_col))
                         
         return fk_refs
     
-    def _find_missing_primary_tables(self, fk_refs: Dict[str, Set[str]], 
+    def _find_missing_primary_tables(self, fk_refs: Dict[str, Dict[str, any]],
                                    dataset: RDBDataset) -> List[tuple]:
         """Find which primary key tables are missing and collect their values."""
         missing_tables = []
         
-        for target_table in fk_refs:
+        for target_table, ref_info in fk_refs.items():
             if target_table not in dataset.table_names:
-                # Find all foreign key values pointing to this missing table
+                # This table is missing - collect FK values from actual FK columns
                 fk_values = set()
-                pk_column = target_table + '_id'  # Convention assumption
+                pk_column = ref_info['pk_col']  # Use actual PK column from relationships
                 
-                # Collect foreign key values from all tables
-                for table_name in dataset.table_names:
-                    table_df = dataset.get_table(table_name)
-                    for col_name in table_df.columns:
-                        if (col_name == pk_column or 
-                            col_name.endswith(f'_{target_table}_id') or
-                            col_name.startswith(f'{target_table}_')):
-                            # This looks like a foreign key to the missing table
-                            unique_values = table_df[col_name].dropna().unique()
+                # Collect foreign key values from all FK columns that reference this table
+                for fk_table, fk_col in ref_info['fk_refs']:
+                    if fk_table in dataset.table_names:
+                        table_df = dataset.get_table(fk_table)
+                        if fk_col in table_df.columns:
+                            unique_values = table_df[fk_col].dropna().unique()
                             fk_values.update(unique_values)
                 
                 if fk_values:

@@ -417,7 +417,7 @@ def parse_one_column(
         tag = "string"
     elif col_schema.dtype == RDBColumnDType.text_t:
         series = pd.Series(col_data, copy=False)
-        log_ty = "Text"
+        log_ty = "NaturalLanguage"
         tag = "text"
     elif col_schema.dtype == RDBColumnDType.primary_key:
         series = pd.Series(col_data, copy=False)

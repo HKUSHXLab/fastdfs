@@ -46,8 +46,9 @@ class DuckDBBuilder:
         if cutoff_time is None:
             return
         assert RDBCutoffTime.column_name in cutoff_time.columns
-        self.cutoff_time_col_name = RDBCutoffTime.column_name
-        self.cutoff_time_table_name = RDBCutoffTime.table_name
+        self.cutoff_time_col_name = RDBCutoffTime.column_name.value
+        self.cutoff_time_table_name = RDBCutoffTime.table_name.value
+        
         self.db.sql(f"CREATE TABLE {self.cutoff_time_table_name} AS SELECT * from cutoff_time")
         self.cutoff_time = cutoff_time
 
