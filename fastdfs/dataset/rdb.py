@@ -9,6 +9,7 @@ feature engineering.
 from pathlib import Path
 from typing import Dict, List, Tuple
 import pandas as pd
+import numpy as np
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
 
@@ -80,7 +81,16 @@ class RDBDataset:
                     raise ValueError(
                         f"Column {col_schema.name} not found in table {table_schema.name}"
                     )
-                df_data[col_schema.name] = table_data[col_schema.name]
+                
+                col_data = table_data[col_schema.name]
+                
+                # Explicitly cast data based on schema type to ensure consistency
+                if col_schema.dtype == RDBColumnDType.float_t:
+                    col_data = pd.to_numeric(col_data, errors='coerce')
+                elif col_schema.dtype == RDBColumnDType.datetime_t:
+                    col_data = pd.to_datetime(col_data, errors='coerce')
+                
+                df_data[col_schema.name] = col_data
             
             tables[table_schema.name] = pd.DataFrame(df_data)
         

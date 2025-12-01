@@ -14,7 +14,7 @@ from .base_engine import DFSEngine, DFSConfig, dfs_engine
 from ..dataset.rdb import RDBDataset
 from .gen_sqls import features2sql, decode_column_from_sql
 from .duckdb_database import DuckDBBuilder
-from ..dataset.meta import RDBCutoffTime
+from ..dataset.meta import RDBCutoffTime, RDBColumnDType
 
 __all__ = ['DFS2SQLEngine']
 
@@ -114,6 +114,16 @@ class DFS2SQLEngine(DFSEngine):
         for table_name in rdb.table_names:
             df = rdb.get_table(table_name)
             table_meta = rdb.get_table_metadata(table_name)
+
+            # Enforce types based on metadata to avoid DuckDB inferring VARCHAR for numeric columns
+            for col_schema in table_meta.columns:
+                if col_schema.name in df.columns:
+                    if col_schema.dtype == RDBColumnDType.float_t:
+                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
+                    elif col_schema.dtype == RDBColumnDType.datetime_t:
+                        df[col_schema.name] = pd.to_datetime(df[col_schema.name], errors='coerce')
+                    elif col_schema.dtype == RDBColumnDType.timestamp_t:
+                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
 
             # Get the appropriate index column
             index_col = self._get_table_index(table_meta)
