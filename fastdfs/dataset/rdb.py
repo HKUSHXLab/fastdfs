@@ -9,7 +9,6 @@ feature engineering.
 from pathlib import Path
 from typing import Dict, List, Tuple
 import pandas as pd
-import numpy as np
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
 
