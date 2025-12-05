@@ -180,6 +180,17 @@ class DFSEngine:
         # Clean dataframe to handle problematic columns (arrays, lists, etc.)
         cleaned_df = self._clean_target_dataframe(target_dataframe)
 
+        # Set logical types for foreign key columns to match parent table primary keys
+        # This ensures joins work correctly even when target has integer dtypes
+        logical_types = {}
+        for target_col, rdb_ref in key_mappings.items():
+            if target_col in cleaned_df.columns:
+                # Foreign keys should be Categorical to match primary keys in parent tables
+                logical_types[target_col] = "Categorical"
+        
+        logger.debug(f"Setting logical_types for target dataframe: {logical_types}")
+        logger.debug(f"Target dataframe dtypes before adding to EntitySet: {cleaned_df.dtypes.to_dict()}")
+
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
             dataframe=cleaned_df,

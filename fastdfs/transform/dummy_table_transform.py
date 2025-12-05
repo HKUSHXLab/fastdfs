@@ -6,7 +6,7 @@ primary key tables for foreign key references based on the original implementati
 in fastdfs/preprocess/transform/dummy_table.py.
 """
 
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Union, Any
 import pandas as pd
 from ..dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema, RDBTableDataFormat
 from ..dataset.rdb import RDBDataset
@@ -48,7 +48,7 @@ class HandleDummyTable(RDBTransform):
             new_metadata=new_metadata
         )
     
-    def _collect_foreign_key_references(self, dataset: RDBDataset, relationships: List) -> Dict[str, Dict[str, Set]]:
+    def _collect_foreign_key_references(self, dataset: RDBDataset, relationships: List) -> Dict[str, Dict[str, Union[str, List]]]:
         """Collect all foreign key column references and their target tables.
         
         Returns:
@@ -70,7 +70,7 @@ class HandleDummyTable(RDBTransform):
                         
         return fk_refs
     
-    def _find_missing_primary_tables(self, fk_refs: Dict[str, Dict[str, any]],
+    def _find_missing_primary_tables(self, fk_refs: Dict[str, Dict[str, Any]],
                                    dataset: RDBDataset) -> List[tuple]:
         """Find which primary key tables are missing and collect their values."""
         missing_tables = []
