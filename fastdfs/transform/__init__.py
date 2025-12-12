@@ -16,17 +16,19 @@ from .base import (
 from .datetime_transform import FeaturizeDatetime
 from .filter_transform import FilterColumn
 from .dummy_table_transform import HandleDummyTable
+from .fill_missing_pk import FillMissingPrimaryKey
 from .utils import apply_transform, apply_transform_pipeline
 
 __all__ = [
     "RDBTransform",
-    "TableTransform", 
+    "TableTransform",
     "ColumnTransform",
     "RDBTransformPipeline",
     "RDBTransformWrapper",
     "FeaturizeDatetime",
     "FilterColumn",
     "HandleDummyTable",
+    "FillMissingPrimaryKey",
     "apply_transform",
     "apply_transform_pipeline",
 ]
