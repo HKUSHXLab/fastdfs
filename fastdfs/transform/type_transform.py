@@ -52,37 +52,36 @@ class CanonicalizeTypes(TableTransform):
                 
             dtype = col_schema.dtype
             
-            try:
-                if dtype == RDBColumnDType.float_t:
-                    # Cast to float32, handling errors by coercing to NaN
-                    new_table[col_name] = pd.to_numeric(table[col_name], errors='coerce').astype(np.float32)
-                    
-                elif dtype == RDBColumnDType.datetime_t:
-                    # Cast to datetime64[ns]
-                    new_table[col_name] = pd.to_datetime(table[col_name], errors='coerce')
-                    
-                elif dtype == RDBColumnDType.timestamp_t:
-                    # Cast to int64 (timestamp)
-                    # First convert to numeric (handles strings), then fill NaNs, then cast to int
-                    # Note: int64 doesn't support NaN, so we might need Int64 (nullable) or fillna
-                    # Here we use Int64 to allow nulls
-                    new_table[col_name] = pd.to_numeric(table[col_name], errors='coerce').astype('Int64')
-                    
-                elif dtype == RDBColumnDType.text_t:
-                    # Cast to string/object
-                    new_table[col_name] = table[col_name].astype(str)
-                    
-                elif dtype == RDBColumnDType.category_t:
-                    # Cast to category
-                    new_table[col_name] = table[col_name].astype('category')
-                    
-                elif dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]:
-                    # Keys are typically strings or integers, but 'object' is safest for mixed types
-                    # or to preserve exact formatting of IDs
-                    new_table[col_name] = table[col_name].astype(str)
-                    
-            except Exception as e:
-                logger.warning(f"Failed to cast column '{col_name}' in table '{table_metadata.name}' to {dtype}: {e}")
+            if dtype == RDBColumnDType.float_t:
+                # Cast to float32, handling errors by coercing to NaN
+                new_table[col_name] = pd.to_numeric(table[col_name], errors='coerce').astype(np.float32)
+                
+            elif dtype == RDBColumnDType.datetime_t:
+                # Cast to datetime64[ns]
+                new_table[col_name] = pd.to_datetime(table[col_name], errors='coerce')
+                
+            elif dtype == RDBColumnDType.timestamp_t:
+                # Cast to int64 (timestamp)
+                # First convert to numeric (handles strings), then fill NaNs, then cast to int
+                # Note: int64 doesn't support NaN, so we might need Int64 (nullable) or fillna
+                # Here we use Int64 to allow nulls
+                new_table[col_name] = pd.to_numeric(table[col_name], errors='coerce').astype('Int64')
+                
+            elif dtype == RDBColumnDType.text_t:
+                # Cast to string/object
+                new_table[col_name] = table[col_name].astype(str)
+                
+            elif dtype == RDBColumnDType.category_t:
+                # Cast to category
+                new_table[col_name] = table[col_name].astype('category')
+                
+            elif dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]:
+                # Keys are typically strings or integers, but 'object' is safest for mixed types
+                # or to preserve exact formatting of IDs
+                new_table[col_name] = table[col_name].astype(str)
+            
+            else:
+                raise ValueError(f"Unsupported column dtype '{dtype}' for column '{col_name}'")
         
         # Metadata remains unchanged as we are only enforcing the types defined in it
         return new_table, table_metadata

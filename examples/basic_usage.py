@@ -16,7 +16,15 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import fastdfs
-from fastdfs.transform import RDBTransformPipeline, HandleDummyTable, FeaturizeDatetime, FilterColumn, RDBTransformWrapper
+from fastdfs.transform import (
+    RDBTransformPipeline,
+    HandleDummyTable,
+    FeaturizeDatetime,
+    FilterColumn,
+    RDBTransformWrapper,
+    FillMissingPrimaryKey,
+    CanonicalizeTypes,
+)
 from fastdfs.utils.logging_config import configure_logging
 
 # Configure logging
@@ -35,8 +43,10 @@ def main():
     # 2. Create transform pipeline following the design document
     transform_pipeline = RDBTransformPipeline([
         HandleDummyTable(),
+        FillMissingPrimaryKey(),
         RDBTransformWrapper(FeaturizeDatetime(features=["year", "month", "hour"])),
-        RDBTransformWrapper(FilterColumn(drop_redundant=True))
+        RDBTransformWrapper(FilterColumn(drop_dtypes=["text"])),
+        RDBTransformWrapper(CanonicalizeTypes())
     ])
     
     # 3. Create target dataframe (following test_dfs_engines.py pattern)
