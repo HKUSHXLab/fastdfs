@@ -165,19 +165,49 @@ class DFSEngine:
 
         This method builds the EntitySet, runs featuretools DFS to generate
         feature specifications, and filters the results based on configuration.
-        This is common logic shared by all engines.
+        
+        For multiple key mappings, processes each separately to work around
+        featuretools' path-sharing bug where shared downstream entities block
+        feature generation from secondary relationship paths.
 
         Returns:
             List of featuretools FeatureBase objects representing features to compute
         """
-        # Build EntitySet from RDB tables
+        
+        # Workaround for multiple keys: process each key separately
+        if len(key_mappings) > 1:
+            logger.info(f"Detected {len(key_mappings)} key mappings. Processing each separately to avoid path conflicts.")
+            all_features = []
+            feature_names_seen = set()
+            
+            for key_idx, (key_col, rdb_ref) in enumerate(key_mappings.items(), 1):
+                logger.info(f"Processing key {key_idx}/{len(key_mappings)}: {key_col} → {rdb_ref}")
+                
+                # Recursively call with single key
+                single_key_features = self.prepare_features(
+                    rdb, target_dataframe, {key_col: rdb_ref}, cutoff_time_column, config
+                )
+                
+                # Collect unique features
+                new_count = 0
+                for feat in single_key_features:
+                    feat_name = feat.get_name()
+                    if feat_name not in feature_names_seen:
+                        all_features.append(feat)
+                        feature_names_seen.add(feat_name)
+                        new_count += 1
+                
+                logger.info(f"Added {new_count} unique features from {key_col}")
+            
+            logger.info(f"Total unique features from all keys: {len(all_features)}")
+            return all_features
+        
+        # Single key mapping - standard DFS logic
         entity_set = self._build_entity_set_from_rdb(rdb)
 
-        # Add target dataframe as temporary entity
         target_entity_name = "__target__"
-        target_index = "__target_index__"  # This should already be in the dataframe
+        target_index = "__target_index__"
 
-        # Clean dataframe to handle problematic columns (arrays, lists, etc.)
         cleaned_df = self._clean_target_dataframe(target_dataframe)
 
         entity_set = entity_set.add_dataframe(
@@ -187,15 +217,12 @@ class DFSEngine:
             time_index=cutoff_time_column
         )
 
-        # Add relationships from target to RDB entities
         self._add_target_relationships(entity_set, target_entity_name, key_mappings)
 
         logger.debug(entity_set)
 
-        # Convert primitive names to objects
         agg_primitives = self._convert_primitives(config.agg_primitives)
 
-        # Generate feature specifications using featuretools
         dfs_kwargs = {
             'entityset': entity_set,
             'target_dataframe_name': target_entity_name,
@@ -205,7 +232,6 @@ class DFSEngine:
             'features_only': True
         }
 
-        # Add optional parameters if specified
         if config.max_features > 0:
             dfs_kwargs['max_features'] = config.max_features
         if config.include_entities:
@@ -215,7 +241,6 @@ class DFSEngine:
 
         features = ft.dfs(**dfs_kwargs)
 
-        # Filter features based on configuration
         filtered_features = self._filter_features(features, entity_set, target_entity_name, config)
 
         return filtered_features
@@ -417,7 +442,7 @@ def parse_one_column(
         tag = "string"
     elif col_schema.dtype == RDBColumnDType.text_t:
         series = pd.Series(col_data, copy=False)
-        log_ty = "Text"
+        log_ty = "NaturalLanguage"
         tag = "text"
     elif col_schema.dtype == RDBColumnDType.primary_key:
         series = pd.Series(col_data, copy=False)
