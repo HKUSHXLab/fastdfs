@@ -14,12 +14,12 @@ __all__ = [
 class RDBColumnDType(str, Enum):
     """Column data type model."""
     float_t = 'float'            # np.float32
-    category_t = 'category'      # object
+    category_t = 'category'      # pandas.Categorical
     datetime_t = 'datetime'      # np.datetime64
     text_t = 'text'              # str
-    timestamp_t = 'timestamp'    # np.int64
-    foreign_key = 'foreign_key'  # object
-    primary_key = 'primary_key'  # object
+    timestamp_t = 'timestamp'    # pandas.Int64 to allow NaN
+    foreign_key = 'foreign_key'  # str
+    primary_key = 'primary_key'  # str
 
 class RDBCutoffTime(str, Enum):
     """Column data type model."""
