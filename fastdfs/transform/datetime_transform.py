@@ -16,7 +16,7 @@ from .base import ColumnTransform
 class FeaturizeDatetime(ColumnTransform):
     """Extract datetime features from datetime columns."""
     
-    def __init__(self, features: List[str] = None):
+    def __init__(self, features: List[str] = None, retain_original: bool = True):
         """
         Initialize datetime featurizer.
         
@@ -24,8 +24,10 @@ class FeaturizeDatetime(ColumnTransform):
             features: List of features to extract. 
                      Options: ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek']
                      Default extracts: ['year', 'month', 'day', 'hour']
+            retain_original: Whether to keep the original datetime column. Default is True.
         """
         self.features = features or ['year', 'month', 'day', 'hour']
+        self.retain_original = retain_original
     
     def applies_to(self, column_metadata: RDBColumnSchema) -> bool:
         """Check if this transform should be applied to datetime columns."""
@@ -54,8 +56,14 @@ class FeaturizeDatetime(ColumnTransform):
                 )
                 new_column_schemas.append(new_col_schema)
         
-        # Include original column if not replaced
-        if base_name in feature_df.columns:
+        # Handle original column retention
+        if self.retain_original:
+            if base_name not in feature_df.columns:
+                # Add it back if featurize_datetime_column didn't return it
+                feature_df[base_name] = column
             new_column_schemas.insert(0, column_metadata)
+        else:
+            if base_name in feature_df.columns:
+                feature_df = feature_df.drop(columns=[base_name])
         
         return feature_df, new_column_schemas

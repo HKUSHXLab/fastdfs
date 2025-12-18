@@ -17,6 +17,7 @@ from .datetime_transform import FeaturizeDatetime
 from .filter_transform import FilterColumn
 from .dummy_table_transform import HandleDummyTable
 from .fill_missing_pk import FillMissingPrimaryKey
+from .type_transform import CanonicalizeTypes
 from .utils import apply_transform, apply_transform_pipeline
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "FilterColumn",
     "HandleDummyTable",
     "FillMissingPrimaryKey",
+    "CanonicalizeTypes",
     "apply_transform",
     "apply_transform_pipeline",
 ]

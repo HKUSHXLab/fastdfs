@@ -80,6 +80,28 @@ class TestFeaturizeDatetime:
         
         assert self.transform.applies_to(non_datetime_col) == False
 
+    def test_retain_original_option(self):
+        """Test the retain_original option."""
+        if self.datetime_column is None:
+            pytest.skip("No datetime column found in test data")
+            
+        # Test with retain_original=True (default)
+        transform_retain = FeaturizeDatetime(features=['year'], retain_original=True)
+        result_df, result_schemas = transform_retain(
+            self.datetime_column, self.datetime_metadata
+        )
+        assert self.datetime_metadata.name in result_df.columns
+        assert any(s.name == self.datetime_metadata.name for s in result_schemas)
+        
+        # Test with retain_original=False
+        transform_drop = FeaturizeDatetime(features=['year'], retain_original=False)
+        result_df, result_schemas = transform_drop(
+            self.datetime_column, self.datetime_metadata
+        )
+        assert self.datetime_metadata.name not in result_df.columns
+        assert not any(s.name == self.datetime_metadata.name for s in result_schemas)
+        assert 'timestamp_year' in result_df.columns
+
 
 class TestFilterColumn:
     """Test column filtering transform."""

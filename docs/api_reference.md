@@ -357,6 +357,38 @@ datetime_transform = RDBTransformWrapper(
 rdb_with_time_features = datetime_transform(rdb)
 ```
 
+### `CanonicalizeTypes`
+
+Transform that enforces data types in RDB tables according to their metadata schema.
+
+```python
+class CanonicalizeTypes(TableTransform):
+    def __call__(self, table: pd.DataFrame, table_metadata: RDBTableSchema) -> Tuple[pd.DataFrame, RDBTableSchema]
+```
+
+**Purpose:** 
+- Casts columns to the types defined in `metadata.yaml` (e.g., `float`, `datetime`, `category`).
+- Handles missing values and coercion errors safely.
+- Drops columns that are present in the data but not defined in the metadata.
+- Raises an error if a column defined in the metadata is missing from the data.
+
+**Example:**
+```python
+transform = RDBTransformWrapper(CanonicalizeTypes())
+clean_rdb = transform(rdb)
+```
+
+### `FillMissingPrimaryKey`
+
+Transform that fills missing values in primary key columns.
+
+```python
+class FillMissingPrimaryKey(TableTransform):
+    def __call__(self, table: pd.DataFrame, table_metadata: RDBTableSchema) -> Tuple[pd.DataFrame, RDBTableSchema]
+```
+
+**Purpose:** Ensures primary key integrity by filling missing values (NaNs) with a generated unique identifier or a placeholder.
+
 ### `FeaturizeDatetime`
 
 Transform that extracts datetime components from datetime columns.

@@ -174,7 +174,7 @@ class DFSEngine:
         feature specifications, and filters the results based on configuration.
         
         For multiple key mappings, processes each separately to work around
-        featuretools' path-sharing bug where shared downstream entities block
+        featuretools' path-sharing bug where shared downstream entities omit
         feature generation from secondary relationship paths.
 
         Returns:
@@ -182,32 +182,32 @@ class DFSEngine:
         """
         
         # Workaround for multiple keys: process each key separately
-        #if len(key_mappings) > 1:
-        #    logger.info(f"Detected {len(key_mappings)} key mappings. Processing each separately to avoid path conflicts.")
-        #    all_features = []
-        #    feature_names_seen = set()
-        #    
-        #    for key_idx, (key_col, rdb_ref) in enumerate(key_mappings.items(), 1):
-        #        logger.info(f"Processing key {key_idx}/{len(key_mappings)}: {key_col} → {rdb_ref}")
-        #        
-        #        # Recursively call with single key
-        #        single_key_features = self.prepare_features(
-        #            rdb, target_dataframe, {key_col: rdb_ref}, cutoff_time_column, config
-        #        )
-        #        
-        #        # Collect unique features TODO: question mark
-        #        new_count = 0
-        #        for feat in single_key_features:
-        #            feat_name = feat.get_name()
-        #            if feat_name not in feature_names_seen:
-        #                all_features.append(feat)
-        #                feature_names_seen.add(feat_name)
-        #                new_count += 1
-        #        
-        #        logger.info(f"Added {new_count} unique features from {key_col}")
-        #    
-        #    logger.info(f"Total unique features from all keys: {len(all_features)}")
-        #    return all_features
+        if len(key_mappings) > 1:
+            logger.info(f"Detected {len(key_mappings)} key mappings. Processing each separately to avoid path conflicts.")
+            all_features = []
+            feature_names_seen = set()
+            
+            for key_idx, (key_col, rdb_ref) in enumerate(key_mappings.items(), 1):
+                logger.info(f"Processing key {key_idx}/{len(key_mappings)}: {key_col} -> {rdb_ref}")
+                
+                # Recursively call with single key
+                single_key_features = self.prepare_features(
+                    rdb, target_dataframe, {key_col: rdb_ref}, cutoff_time_column, config
+                )
+                
+                # Collect unique features
+                new_count = 0
+                for feat in single_key_features:
+                    feat_name = feat.get_name()
+                    if feat_name not in feature_names_seen:
+                        all_features.append(feat)
+                        feature_names_seen.add(feat_name)
+                        new_count += 1
+                
+                logger.info(f"Added {new_count} unique features from {key_col}")
+            
+            logger.info(f"Total unique features from all keys: {len(all_features)}")
+            return all_features
         
         # Single key mapping - standard DFS logic
         entity_set = self._build_entity_set_from_rdb(rdb)
