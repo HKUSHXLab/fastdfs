@@ -50,7 +50,7 @@ class DFSConfig(pydantic.BaseModel):
     max_depth: int = 2
     use_cutoff_time: bool = True
     engine: str = "featuretools"
-    engine_path: Optional[str] = "/tmp/duck.db"
+    engine_path: Optional[str] = None
     trans_primitives: List[str] = []
     where_primitives: List[str] = []
     max_features: int = -1
@@ -123,8 +123,15 @@ class DFSEngine:
             **{target_index: np.arange(len(target_dataframe))}
         )
 
+        # Optimization: Filter target dataframe to only include necessary columns
+        # This defines the contract for the engines: they only see keys, time, and index.
+        columns_to_keep = {target_index}
+        columns_to_keep.update(key_mappings.keys())
+        if cutoff_time_column:
+            columns_to_keep.add(cutoff_time_column)
+            
         # Work on a defensive copy that engines are free to mutate.
-        target_df_for_engine = target_df_with_index.copy()
+        target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
 
         # Phase 1: Feature preparation (common logic in base class)
         features = self.prepare_features(rdb, target_df_for_engine, key_mappings, cutoff_time_column, config)
@@ -175,32 +182,32 @@ class DFSEngine:
         """
         
         # Workaround for multiple keys: process each key separately
-        if len(key_mappings) > 1:
-            logger.info(f"Detected {len(key_mappings)} key mappings. Processing each separately to avoid path conflicts.")
-            all_features = []
-            feature_names_seen = set()
-            
-            for key_idx, (key_col, rdb_ref) in enumerate(key_mappings.items(), 1):
-                logger.info(f"Processing key {key_idx}/{len(key_mappings)}: {key_col} → {rdb_ref}")
-                
-                # Recursively call with single key
-                single_key_features = self.prepare_features(
-                    rdb, target_dataframe, {key_col: rdb_ref}, cutoff_time_column, config
-                )
-                
-                # Collect unique features
-                new_count = 0
-                for feat in single_key_features:
-                    feat_name = feat.get_name()
-                    if feat_name not in feature_names_seen:
-                        all_features.append(feat)
-                        feature_names_seen.add(feat_name)
-                        new_count += 1
-                
-                logger.info(f"Added {new_count} unique features from {key_col}")
-            
-            logger.info(f"Total unique features from all keys: {len(all_features)}")
-            return all_features
+        #if len(key_mappings) > 1:
+        #    logger.info(f"Detected {len(key_mappings)} key mappings. Processing each separately to avoid path conflicts.")
+        #    all_features = []
+        #    feature_names_seen = set()
+        #    
+        #    for key_idx, (key_col, rdb_ref) in enumerate(key_mappings.items(), 1):
+        #        logger.info(f"Processing key {key_idx}/{len(key_mappings)}: {key_col} → {rdb_ref}")
+        #        
+        #        # Recursively call with single key
+        #        single_key_features = self.prepare_features(
+        #            rdb, target_dataframe, {key_col: rdb_ref}, cutoff_time_column, config
+        #        )
+        #        
+        #        # Collect unique features TODO: question mark
+        #        new_count = 0
+        #        for feat in single_key_features:
+        #            feat_name = feat.get_name()
+        #            if feat_name not in feature_names_seen:
+        #                all_features.append(feat)
+        #                feature_names_seen.add(feat_name)
+        #                new_count += 1
+        #        
+        #        logger.info(f"Added {new_count} unique features from {key_col}")
+        #    
+        #    logger.info(f"Total unique features from all keys: {len(all_features)}")
+        #    return all_features
         
         # Single key mapping - standard DFS logic
         entity_set = self._build_entity_set_from_rdb(rdb)
@@ -208,11 +215,9 @@ class DFSEngine:
         target_entity_name = "__target__"
         target_index = "__target_index__"
 
-        cleaned_df = self._clean_target_dataframe(target_dataframe)
-
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
-            dataframe=cleaned_df,
+            dataframe=target_dataframe,
             index=target_index,
             time_index=cutoff_time_column
         )
@@ -325,33 +330,6 @@ class DFSEngine:
             primitives.append(prim)
         return primitives
 
-    def _clean_target_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean target dataframe to handle problematic columns that woodwork can't process.
-        
-        Removes columns that contain arrays, lists, or other complex types that cause
-        issues during logical type inference.
-        """
-        cleaned_df = df.copy()
-        columns_to_drop = []
-        
-        for col in cleaned_df.columns:
-            # Check if column contains arrays/lists or other non-scalar values
-            if cleaned_df[col].dtype == 'object':
-                # Check first non-null value to see if it's an array/list
-                sample = cleaned_df[col].dropna()
-                if len(sample) > 0:
-                    first_val = sample.iloc[0]
-                    if isinstance(first_val, (list, np.ndarray, tuple)) or str(type(first_val)).startswith('<class'):
-                        columns_to_drop.append(col)
-                        logger.warning(f"Dropping problematic column '{col}' containing non-scalar values")
-        
-        # Drop problematic columns
-        if columns_to_drop:
-            cleaned_df = cleaned_df.drop(columns=columns_to_drop)
-            logger.info(f"Dropped {len(columns_to_drop)} problematic columns: {columns_to_drop}")
-        
-        return cleaned_df
-
     def _filter_features(
         self,
         features: List[ft.FeatureBase],
@@ -400,6 +378,21 @@ class DFSEngine:
         Compute actual feature values from feature specifications.
 
         This is engine-specific logic implemented by subclasses.
+
+        Contract:
+        1. Input `target_dataframe`:
+           - Contains ONLY the necessary columns:
+             - `__target_index__`: Unique identifier for alignment.
+             - Columns specified in `key_mappings`.
+             - `cutoff_time_column` (if provided).
+           - Does NOT contain other columns from the original user input.
+        
+        2. Output DataFrame:
+           - Must contain `__target_index__` column (or index) for alignment.
+           - Must contain the computed feature columns.
+           - Should NOT contain columns from the input `target_dataframe` (keys, cutoff time)
+             to avoid duplication when merging back to the original data.
+           - Must return a valid DataFrame even if no features are computed (containing just the index).
         """
         pass
 

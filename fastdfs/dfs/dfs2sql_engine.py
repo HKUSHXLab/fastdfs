@@ -19,6 +19,9 @@ from ..dataset.meta import RDBCutoffTime, RDBColumnDType
 __all__ = ['DFS2SQLEngine']
 
 
+import tempfile
+import uuid
+
 @dfs_engine
 class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
@@ -37,7 +40,14 @@ class DFS2SQLEngine(DFSEngine):
         """Compute feature values using SQL generation (reuse existing computation logic)."""
         # Set up database with RDB tables + target table
         target_index = "__target_index__"  # Target index is already handled by base class
-        builder = DuckDBBuilder(Path(config.engine_path))
+        
+        engine_path = config.engine_path
+        if engine_path is None:
+            # Generate a random temporary file path if not specified
+            engine_path = str(Path(tempfile.gettempdir()) / f"fastdfs_{uuid.uuid4()}.db")
+            logger.debug(f"Using temporary DuckDB path: {engine_path}")
+            
+        builder = DuckDBBuilder(Path(engine_path))
         self._build_database_tables(builder, rdb, target_dataframe, target_index, cutoff_time_column)
         db = builder.db
 
@@ -98,7 +108,8 @@ class DFS2SQLEngine(DFSEngine):
         else:
             # No features generated
             logger.warning("No features generated from SQL execution.")
-            return None
+            # Return dataframe with just the target index to satisfy contract
+            return pd.DataFrame({target_index: target_dataframe[target_index]})
 
     def _build_database_tables(
         self,
