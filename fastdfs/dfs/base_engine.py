@@ -50,7 +50,7 @@ class DFSConfig(pydantic.BaseModel):
     max_depth: int = 2
     use_cutoff_time: bool = True
     engine: str = "featuretools"
-    engine_path: Optional[str] = "/tmp/duck.db"
+    engine_path: Optional[str] = None
     trans_primitives: List[str] = []
     where_primitives: List[str] = []
     max_features: int = -1

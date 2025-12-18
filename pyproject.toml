@@ -44,7 +44,7 @@ dependencies = [
     "featuretools",
     "duckdb",
     "sqlalchemy",
-    "sqlglot",
+    "sqlglot>=27.8.0,<28.0.0",
     "sql_formatter",
     
     # Configuration and CLI
