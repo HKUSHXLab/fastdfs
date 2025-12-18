@@ -98,7 +98,8 @@ class DFS2SQLEngine(DFSEngine):
         else:
             # No features generated
             logger.warning("No features generated from SQL execution.")
-            return None
+            # Return dataframe with just the target index to satisfy contract
+            return pd.DataFrame({target_index: target_dataframe[target_index]})
 
     def _build_database_tables(
         self,
