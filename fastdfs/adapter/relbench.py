@@ -63,7 +63,7 @@ class RelBenchAdapter:
         
         # Create RDB in-memory
         dataset_meta = RDBMeta(
-            dataset_name=self.dataset_name,
+            name=self.dataset_name,
             tables=table_schemas,
         )
         rdb = RDB(metadata=dataset_meta, tables=tables)
@@ -103,7 +103,7 @@ class RelBenchAdapter:
         # 4. Create Metadata
         logger.info("Creating RDB Metadata...")
         dataset_meta = RDBMeta(
-            dataset_name=self.dataset_name,
+            name=self.dataset_name,
             tables=table_schemas,
         )
         

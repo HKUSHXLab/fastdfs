@@ -68,7 +68,7 @@ class RDB:
             tables.append(table_schema)
         
         return RDBMeta(
-            dataset_name=raw_data['dataset_name'],
+            name=raw_data['dataset_name'],
             tables=tables
         )
     
@@ -160,7 +160,7 @@ class RDB:
         
         # Create new metadata object
         new_dataset.metadata = RDBMeta(
-            dataset_name=self.metadata.dataset_name,
+            name=self.metadata.name,
             tables=updated_table_schemas
         )
         

@@ -187,7 +187,7 @@ class TestDatasetMigration:
             
             # Test that converted dataset can be loaded
             rdb_dataset = RDB(rdb_output_path)
-            assert rdb_dataset.metadata.dataset_name == "sbm_user_item"
+            assert rdb_dataset.metadata.name == "sbm_user_item"
             assert len(rdb_dataset.table_names) == 3
     
     def test_extract_target_tables_from_tasks(self, test_data_path):

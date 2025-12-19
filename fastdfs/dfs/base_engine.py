@@ -253,7 +253,7 @@ class DFSEngine:
     def _build_entity_set_from_rdb(self, rdb: RDB) -> ft.EntitySet:
         """Build EntitySet from RDB tables only (adapted from existing build_dataframes logic)."""
 
-        entity_set = ft.EntitySet(id=rdb.metadata.dataset_name)
+        entity_set = ft.EntitySet(id=rdb.metadata.name)
 
         # Add all RDB tables as entities
         for table_name in rdb.table_names:

@@ -37,7 +37,7 @@ def main():
     rdb_path = project_root / "tests" / "data" / "test_rdb_new"
     print(f"Loading RDB from: {rdb_path}")
     rdb = fastdfs.load_rdb(str(rdb_path))
-    print(f"Loaded dataset: {rdb.metadata.dataset_name}")
+    print(f"Loaded dataset: {rdb.metadata.name}")
     print(f"Tables: {rdb.table_names}")
     
     # 2. Create transform pipeline following the design document

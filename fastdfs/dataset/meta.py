@@ -8,7 +8,7 @@ __all__ = [
     "RDBColumnSchema",
     "RDBTableDataFormat",
     "RDBTableSchema",
-    "RDBMeta"
+    "RDBMeta",
     "RDBDatasetMeta",
 ]
 
@@ -40,7 +40,7 @@ class RDBColumnSchema(BaseModel):
     # Column name.
     name : str
     # Column data type
-    dtype : RDBColumnDType
+    dtype : Optional[RDBColumnDType] = None
 
 class RDBTableDataFormat(str, Enum):
     PARQUET = 'parquet'
@@ -68,7 +68,7 @@ class RDBMeta(BaseModel):
     class Config:
         use_enum_values = True
     
-    dataset_name: str
+    name: str  # Name of the RDB
     tables: List[RDBTableSchema]
     
     @property

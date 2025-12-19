@@ -5,14 +5,16 @@ This module provides the core functions for computing DFS features using
 the RDB interface.
 """
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Tuple
 import pandas as pd
 from pathlib import Path
 
 from .dfs import DFSConfig, get_dfs_engine
 from .dataset.rdb import RDB
+from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat
+from .transform.infer_schema import InferSchemaTransform
 
-__all__ = ['load_rdb', 'compute_dfs_features', 'DFSPipeline']
+__all__ = ['load_rdb', 'create_rdb', 'compute_dfs_features', 'DFSPipeline']
 
 
 def load_rdb(path: str) -> RDB:
@@ -26,6 +28,65 @@ def load_rdb(path: str) -> RDB:
         RDB instance
     """
     return RDB(Path(path))
+
+
+def create_rdb(
+    tables: Dict[str, pd.DataFrame],
+    name: str = "myrdb",
+    primary_keys: Optional[Dict[str, str]] = None,
+    foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
+    time_columns: Optional[Dict[str, str]] = None,
+    type_hints: Optional[Dict[str, Dict[str, str]]] = None
+) -> RDB:
+    """
+    Create an RDB from a dictionary of pandas DataFrames.
+    
+    This function automatically infers the schema (column types) from the dataframes,
+    using the provided metadata (keys, time columns) as hints.
+    
+    Args:
+        tables: Dictionary mapping table names to pandas DataFrames.
+        name: Name of the RDB.
+        primary_keys: Dictionary mapping table names to their primary key column name.
+        foreign_keys: List of relationships as (child_table, child_col, parent_table, parent_col).
+        time_columns: Dictionary mapping table names to their time column name.
+        type_hints: Dictionary mapping table names to a dictionary of {column_name: dtype_str}.
+                    Useful for overriding inferred types.
+                    
+    Returns:
+        RDB: An initialized RDB object with inferred schema.
+    """
+    # Create initial empty schemas
+    table_schemas = []
+    for table_name in tables.keys():
+        # We create a minimal schema with just the name and format
+        # The columns will be populated by the transform
+        schema = RDBTableSchema(
+            name=table_name,
+            source=f"{table_name}.parquet", # Placeholder
+            format=RDBTableDataFormat.PARQUET,
+            columns=[] # Empty initially
+        )
+        table_schemas.append(schema)
+        
+    metadata = RDBMeta(
+        name=name,
+        tables=table_schemas
+    )
+    
+    rdb = RDB(metadata=metadata, tables=tables)
+    
+    # Apply inference transform
+    transform = InferSchemaTransform(
+        primary_keys=primary_keys,
+        foreign_keys=foreign_keys,
+        time_columns=time_columns,
+        type_hints=type_hints
+    )
+    
+    rdb = transform(rdb)
+    
+    return rdb
 
 
 def compute_dfs_features(

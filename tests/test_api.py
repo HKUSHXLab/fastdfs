@@ -38,7 +38,7 @@ class TestPhase4API:
         """Test loading RDB dataset."""
         rdb = load_rdb(str(test_rdb_path))
         
-        assert rdb.metadata.dataset_name == "sbm_user_item"
+        assert rdb.metadata.name == "sbm_user_item"
         assert len(rdb.table_names) == 3
         assert "user" in rdb.table_names
         assert "item" in rdb.table_names
