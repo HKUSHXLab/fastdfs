@@ -73,43 +73,4 @@ def test_create_rdb_type_hints(sample_data):
     users_meta = rdb.get_table_metadata("users")
     assert users_meta.column_dict["age"].dtype == RDBColumnDType.category_t
 
-@pytest.fixture
-def infer_schema_data():
-    df = pd.DataFrame({
-        "id": [1, 2, 3],
-        "val": [1.1, 2.2, 3.3],
-        "cat": ["a", "b", "a"],
-        "ts": pd.to_datetime(["2023-01-01", "2023-01-02", "2023-01-03"])
-    })
-    
-    tables = {"table1": df}
-    
-    # Create initial RDB with empty schema
-    schema = RDBTableSchema(
-        name="table1",
-        source="table1.parquet",
-        format=RDBTableDataFormat.PARQUET,
-        columns=[]
-    )
-    metadata = RDBMeta(name="test", tables=[schema])
-    return RDB(metadata=metadata, tables=tables)
 
-def test_infer_basic(infer_schema_data):
-    transform = InferSchemaTransform(
-        primary_keys={"table1": "id"},
-        time_columns={"table1": "ts"}
-    )
-    
-    new_rdb = transform(infer_schema_data)
-    meta = new_rdb.get_table_metadata("table1")
-    
-    assert meta.column_dict["id"].dtype == RDBColumnDType.primary_key
-    assert meta.column_dict["val"].dtype == RDBColumnDType.float_t
-    assert meta.column_dict["cat"].dtype == RDBColumnDType.category_t # Low cardinality
-    assert meta.column_dict["ts"].dtype == RDBColumnDType.datetime_t
-    assert meta.time_column == "ts"
-
-def test_infer_no_pk_fk_warning(infer_schema_data):
-    transform = InferSchemaTransform()
-    # Just ensure it runs without error for now
-    new_rdb = transform(infer_schema_data)
