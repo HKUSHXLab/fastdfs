@@ -11,7 +11,7 @@ import tqdm
 from loguru import logger
 
 from .base_engine import DFSEngine, DFSConfig, dfs_engine
-from ..dataset.rdb import RDBDataset
+from ..dataset.rdb import RDB
 from .gen_sqls import features2sql, decode_column_from_sql
 from .duckdb_database import DuckDBBuilder
 from ..dataset.meta import RDBCutoffTime, RDBColumnDType
@@ -30,7 +30,7 @@ class DFS2SQLEngine(DFSEngine):
 
     def compute_feature_matrix(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str],
@@ -114,7 +114,7 @@ class DFS2SQLEngine(DFSEngine):
     def _build_database_tables(
         self,
         builder: DuckDBBuilder,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         target_index: str,
         cutoff_time_column: Optional[str]
@@ -180,7 +180,7 @@ class DFS2SQLEngine(DFSEngine):
         # If no primary key, create default index
         return "__index__"
 
-    def _build_column_type_map(self, rdb: RDBDataset, target_dataframe: pd.DataFrame) -> Dict[Tuple[str, str], str]:
+    def _build_column_type_map(self, rdb: RDB, target_dataframe: pd.DataFrame) -> Dict[Tuple[str, str], str]:
         """Build a mapping from (table_name, column_name) to dtype string for boolean detection.
         
         Returns:

@@ -8,7 +8,8 @@ __all__ = [
     "RDBColumnSchema",
     "RDBTableDataFormat",
     "RDBTableSchema",
-    "RDBDatasetMeta"
+    "RDBMeta"
+    "RDBDatasetMeta",
 ]
 
 class RDBColumnDType(str, Enum):
@@ -62,7 +63,7 @@ class RDBTableSchema(BaseModel):
         return {col_schema.name: col_schema for col_schema in self.columns}
 
 
-class RDBDatasetMeta(BaseModel):
+class RDBMeta(BaseModel):
     """Simplified dataset metadata without tasks."""
     class Config:
         use_enum_values = True
@@ -85,3 +86,5 @@ class RDBDatasetMeta(BaseModel):
                         parent_col     # parent column
                     ))
         return relationships
+
+RDBDatasetMeta = RDBMeta  # Alias for backward compatibility

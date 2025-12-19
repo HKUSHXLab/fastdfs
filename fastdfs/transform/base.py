@@ -10,13 +10,13 @@ from typing import List, Dict, Optional, Tuple, Union
 import pandas as pd
 
 from ..dataset.meta import RDBColumnSchema, RDBTableSchema
-from ..dataset.rdb import RDBDataset
+from ..dataset.rdb import RDB
 
 class RDBTransform(abc.ABC):
     """Base class for RDB transformations - simplified composable operations."""
     
     @abc.abstractmethod
-    def __call__(self, rdb: 'RDBDataset') -> 'RDBDataset':
+    def __call__(self, rdb: 'RDB') -> 'RDB':
         """
         Apply transformation to RDB and return new RDB.
         
@@ -97,7 +97,7 @@ class RDBTransformPipeline(RDBTransform):
         """
         self.transforms = transforms
     
-    def __call__(self, rdb: 'RDBDataset') -> 'RDBDataset':
+    def __call__(self, rdb: 'RDB') -> 'RDB':
         """Apply all transforms in sequence."""
         result = rdb
         for transform in self.transforms:
@@ -117,7 +117,7 @@ class RDBTransformWrapper(RDBTransform):
         """
         self.inner_transform = inner_transform
     
-    def __call__(self, rdb: 'RDBDataset') -> 'RDBDataset':
+    def __call__(self, rdb: 'RDB') -> 'RDB':
         """Apply inner transform to all applicable tables/columns in RDB."""
         new_tables = {}
         updated_metadata = {}

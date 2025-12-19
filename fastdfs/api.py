@@ -10,12 +10,12 @@ import pandas as pd
 from pathlib import Path
 
 from .dfs import DFSConfig, get_dfs_engine
-from .dataset.rdb import RDBDataset
+from .dataset.rdb import RDB
 
 __all__ = ['load_rdb', 'compute_dfs_features', 'DFSPipeline']
 
 
-def load_rdb(path: str) -> RDBDataset:
+def load_rdb(path: str) -> RDB:
     """
     Load a relational database dataset.
     
@@ -25,11 +25,11 @@ def load_rdb(path: str) -> RDBDataset:
     Returns:
         RDBDataset instance
     """
-    return RDBDataset(Path(path))
+    return RDB(Path(path))
 
 
 def compute_dfs_features(
-    rdb: RDBDataset,
+    rdb: RDB,
     target_dataframe: pd.DataFrame,
     key_mappings: Dict[str, str],
     cutoff_time_column: Optional[str] = None,
@@ -108,7 +108,7 @@ class DFSPipeline:
     
     def compute_features(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,

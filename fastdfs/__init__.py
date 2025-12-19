@@ -5,7 +5,7 @@ FastDFS - Fast Deep Feature Synthesis
 A standalone package for deep feature synthesis using a table-centric approach.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Main Table-Centric API
 from .api import (
@@ -16,7 +16,7 @@ from .api import (
 
 # Core components
 from .dfs import DFSConfig
-from .dataset.rdb import RDBDataset
+from .dataset.rdb import RDB, RDBDataset
 from .transform import (
     RDBTransform,
     RDBTransformPipeline,
@@ -34,6 +34,7 @@ __all__ = [
     
     # Core components
     "DFSConfig",
+    "RDB",
     "RDBDataset",
     "RDBTransform",
     "RDBTransformPipeline",

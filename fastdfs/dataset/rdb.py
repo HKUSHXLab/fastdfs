@@ -7,7 +7,7 @@ feature engineering.
 """
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
@@ -15,24 +15,36 @@ from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateT
 from ..utils import yaml_utils
 from .loader import get_table_data_loader
 from .meta import (
-    RDBDatasetMeta,
+    RDBMeta,
     RDBTableSchema,
     RDBColumnDType,
     RDBColumnSchema,
     RDBTableDataFormat,
 )
 
-__all__ = ['RDBDataset']
+__all__ = ['RDB', 'RDBDataset']
 
-class RDBDataset:
+class RDB:
     """Simplified RDB dataset without tasks - focuses on relational tables only."""
     
-    def __init__(self, path: Path):
-        self.path = Path(path)
-        self.metadata = self._load_metadata()
-        self.tables = self._load_tables()
+    def __init__(
+        self, 
+        path: Optional[Path] = None, 
+        metadata: Optional[RDBMeta] = None, 
+        tables: Optional[Dict[str, pd.DataFrame]] = None
+    ):
+        if path:
+            self.path = Path(path)
+            self.metadata = self._load_metadata()
+            self.tables = self._load_tables()
+        elif metadata is not None and tables is not None:
+            self.path = None
+            self.metadata = metadata
+            self.tables = tables
+        else:
+            raise ValueError("Either path or (metadata and tables) must be provided.")
     
-    def _load_metadata(self) -> RDBDatasetMeta:
+    def _load_metadata(self) -> RDBMeta:
         """Load metadata from YAML file."""
         metadata_path = self.path / 'metadata.yaml'
         if not metadata_path.exists():
@@ -56,7 +68,7 @@ class RDBDataset:
             )
             tables.append(table_schema)
         
-        return RDBDatasetMeta(
+        return RDBMeta(
             dataset_name=raw_data['dataset_name'],
             tables=tables
         )
@@ -117,19 +129,19 @@ class RDBDataset:
         """Get relationships as (child_table, child_col, parent_table, parent_col)."""
         return self.metadata.relationships
         
-    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDBDataset':
+    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB':
         """Create new RDBDataset with updated tables (for transforms)."""
         # Create a new instance with same metadata but different table data
-        new_dataset = RDBDataset.__new__(RDBDataset)
+        new_dataset = RDB.__new__(RDB)
         new_dataset.path = self.path
         new_dataset.metadata = self.metadata
         new_dataset.tables = new_tables.copy()
         return new_dataset
     
-    def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDBDataset':
+    def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDB':
         """Create new RDBDataset with updated tables and metadata (for transforms that modify schemas)."""
         # Create a new instance with updated metadata and table data
-        new_dataset = RDBDataset.__new__(RDBDataset)
+        new_dataset = RDB.__new__(RDB)
         new_dataset.path = self.path
         new_dataset.tables = new_tables.copy()
         
@@ -148,7 +160,7 @@ class RDBDataset:
                 updated_table_schemas.append(schema)
         
         # Create new metadata object
-        new_dataset.metadata = RDBDatasetMeta(
+        new_dataset.metadata = RDBMeta(
             dataset_name=self.metadata.dataset_name,
             tables=updated_table_schemas
         )
@@ -295,3 +307,5 @@ def extract_target_tables_from_tasks(old_dataset_path: Path, output_dir: Path):
             target_df.to_parquet(output_file, index=False)
             
             print(f"Extracted {task.metadata.name} {split_name} to {output_file}")
+
+RDBDataset = RDB  # Alias for backward compatibility

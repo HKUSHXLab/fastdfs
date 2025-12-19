@@ -13,7 +13,7 @@ import numpy as np
 from loguru import logger
 import pydantic
 
-from ..dataset.rdb import RDBDataset
+from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType, RDBColumnSchema
 
 __all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine']
@@ -68,7 +68,7 @@ class DFSEngine:
 
     def compute_features(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,
@@ -101,7 +101,7 @@ class DFSEngine:
 
     def _compute_features_impl(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str],
@@ -161,7 +161,7 @@ class DFSEngine:
 
     def prepare_features(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str],
@@ -250,7 +250,7 @@ class DFSEngine:
 
         return filtered_features
 
-    def _build_entity_set_from_rdb(self, rdb: RDBDataset) -> ft.EntitySet:
+    def _build_entity_set_from_rdb(self, rdb: RDB) -> ft.EntitySet:
         """Build EntitySet from RDB tables only (adapted from existing build_dataframes logic)."""
 
         entity_set = ft.EntitySet(id=rdb.metadata.dataset_name)
@@ -367,7 +367,7 @@ class DFSEngine:
     @abc.abstractmethod
     def compute_feature_matrix(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str],

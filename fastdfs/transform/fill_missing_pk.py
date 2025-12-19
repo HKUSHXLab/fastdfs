@@ -14,7 +14,7 @@ import pandas as pd
 from collections import defaultdict
 
 from ..dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema
-from ..dataset.rdb import RDBDataset
+from ..dataset.rdb import RDB
 from .base import RDBTransform
 
 
@@ -37,7 +37,7 @@ class FillMissingPrimaryKey(RDBTransform):
             Click: ad_id = [128, 444, 999, 1000] (same 4 rows, unchanged)
     """
     
-    def __call__(self, rdb: RDBDataset) -> RDBDataset:
+    def __call__(self, rdb: RDB) -> RDB:
         """Apply key mapping transformation to RDB."""
         # Get relationships
         relationships = rdb.get_relationships()
@@ -81,7 +81,7 @@ class FillMissingPrimaryKey(RDBTransform):
     
     def _collect_unique_keys(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         pk_to_fk_list: Dict[Tuple[str, str], List[Tuple[str, str]]]
     ) -> Dict[Tuple[str, str], np.ndarray]:
         """
@@ -133,7 +133,7 @@ class FillMissingPrimaryKey(RDBTransform):
     
     def _transform_tables(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         pk_to_fk_list: Dict[Tuple[str, str], List[Tuple[str, str]]],
         fk_to_pk: Dict[Tuple[str, str], Tuple[str, str]],
         unique_keys: Dict[Tuple[str, str], np.ndarray]
