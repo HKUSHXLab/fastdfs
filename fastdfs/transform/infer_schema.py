@@ -25,7 +25,8 @@ class InferSchemaTransform(RDBTransform):
         primary_keys: Optional[Dict[str, str]] = None,
         foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
         time_columns: Optional[Dict[str, str]] = None,
-        type_hints: Optional[Dict[str, Dict[str, str]]] = None
+        type_hints: Optional[Dict[str, Dict[str, str]]] = None,
+        category_threshold: int = 10
     ):
         """
         Args:
@@ -33,11 +34,13 @@ class InferSchemaTransform(RDBTransform):
             foreign_keys: List of (child_table, child_col, parent_table, parent_col)
             time_columns: Dict mapping table_name -> time_column
             type_hints: Dict mapping table_name -> {col_name: dtype_str}
+            category_threshold: Threshold for unique values to consider a column as category.
         """
         self.primary_keys = primary_keys or {}
         self.foreign_keys = foreign_keys or []
         self.time_columns = time_columns or {}
         self.type_hints = type_hints or {}
+        self.category_threshold = category_threshold
 
     def __call__(self, rdb: RDB) -> RDB:
         new_tables = rdb.tables.copy()
@@ -172,7 +175,7 @@ class InferSchemaTransform(RDBTransform):
         if pd.api.types.is_object_dtype(col_data) or pd.api.types.is_string_dtype(col_data):
             try:
                 n_unique = col_data.nunique()
-                if n_unique < 10: # Threshold
+                if n_unique < self.category_threshold: # Threshold
                     return RDBColumnDType.category_t
                 else:
                     return RDBColumnDType.text_t

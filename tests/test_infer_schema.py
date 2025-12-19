@@ -150,3 +150,24 @@ class TestInferSchemaTransform:
         meta = new_rdb.get_table_metadata("nan_table")
         # All NaNs are float in pandas
         assert meta.column_dict["nans"].dtype == RDBColumnDType.float_t
+
+    def test_custom_category_threshold(self):
+        """Test custom category threshold."""
+        # Create data with 5 unique values
+        df = pd.DataFrame({
+            "id": range(10),
+            "col": ["a", "b", "c", "d", "e"] * 2
+        })
+        tables = {"t": df}
+        schema = RDBTableSchema(name="t", source="t.p", format=RDBTableDataFormat.PARQUET, columns=[])
+        rdb = RDB(metadata=RDBMeta(name="test", tables=[schema]), tables=tables)
+        
+        # Threshold 3 -> Should be text (5 > 3)
+        transform_low = InferSchemaTransform(category_threshold=3)
+        rdb_low = transform_low(rdb)
+        assert rdb_low.get_table_metadata("t").column_dict["col"].dtype == RDBColumnDType.text_t
+        
+        # Threshold 6 -> Should be category (5 < 6)
+        transform_high = InferSchemaTransform(category_threshold=6)
+        rdb_high = transform_high(rdb)
+        assert rdb_high.get_table_metadata("t").column_dict["col"].dtype == RDBColumnDType.category_t
