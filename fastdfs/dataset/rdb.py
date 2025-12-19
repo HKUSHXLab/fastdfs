@@ -6,7 +6,7 @@ relational database tables for feature engineering.
 """
 
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Union
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
@@ -68,7 +68,7 @@ class RDB:
             tables.append(table_schema)
         
         return RDBMeta(
-            name=raw_data['dataset_name'],
+            name=raw_data['name'],
             tables=tables
         )
     
@@ -105,39 +105,58 @@ class RDB:
             tables[table_schema.name] = pd.DataFrame(df_data)
         
         return tables
-    
+
     @property
     def table_names(self) -> List[str]:
         """Get list of table names."""
-        return list(self.tables.keys())
-    
-    def get_table(self, name: str) -> pd.DataFrame:
-        """Get a table as a pandas DataFrame."""
-        if name not in self.tables:
-            raise ValueError(f"Table {name} not found. Available tables: {self.table_names}")
-        return self.tables[name].copy()
-    
-    def get_table_metadata(self, name: str) -> RDBTableSchema:
+        return [t.name for t in self.metadata.tables]
+
+    def get_table_metadata(self, table_name: str) -> RDBTableSchema:
         """Get metadata for a specific table."""
-        for table_schema in self.metadata.tables:
-            if table_schema.name == name:
-                return table_schema
-        raise ValueError(f"Table {name} not found. Available tables: {self.table_names}")
-        
+        for table in self.metadata.tables:
+            if table.name == table_name:
+                return table
+        raise ValueError(f"Table {table_name} not found in metadata.")
+
+    def get_table_dataframe(self, table_name: str) -> pd.DataFrame:
+        """Get pandas DataFrame for a specific table."""
+        if table_name not in self.tables:
+            raise ValueError(f"Table {table_name} not found in loaded tables.")
+        return self.tables[table_name]
+
     def get_relationships(self) -> List[Tuple[str, str, str, str]]:
-        """Get relationships as (child_table, child_col, parent_table, parent_col)."""
-        return self.metadata.relationships
+        """
+        Get all foreign key relationships.
         
-    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB':
-        """Create new RDB with updated tables (for transforms)."""
-        # Create a new instance with same metadata but different table data
-        new_dataset = RDB.__new__(RDB)
-        new_dataset.path = self.path
-        new_dataset.metadata = self.metadata
-        new_dataset.tables = new_tables.copy()
-        return new_dataset
-    
-    def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDB':
+        Returns:
+            List of (child_table, child_col, parent_table, parent_col) tuples.
+        """
+        return self.metadata.relationships
+
+    def save(self, path: Union[str, Path]):
+        """
+        Save the RDB to a directory.
+        
+        Args:
+            path: Directory path to save the RDB.
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        
+        # Save tables
+        for table_name, df in self.tables.items():
+            # We assume parquet format for now as it is the default
+            output_path = path / f"{table_name}.parquet"
+            df.to_parquet(output_path)
+            
+        # Save metadata
+        yaml_utils.save_yaml(self.metadata.model_dump(mode='json'), path / "metadata.yaml")
+
+    def create_new_with_tables_and_metadata(
+        self, 
+        new_tables: Dict[str, pd.DataFrame], 
+        new_metadata: Dict[str, RDBTableSchema]
+    ) -> 'RDB':
         """Create new RDB with updated tables and metadata (for transforms that modify schemas)."""
         # Create a new instance with updated metadata and table data
         new_dataset = RDB.__new__(RDB)
