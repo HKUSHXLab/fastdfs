@@ -47,7 +47,7 @@ class RDBTableDataFormat(str, Enum):
     NUMPY = 'numpy'
 
 class RDBTableSchema(BaseModel):
-    """Simplified table schema without task-specific metadata."""
+    """Table schema definition."""
     class Config:
         use_enum_values = True
     
@@ -64,7 +64,7 @@ class RDBTableSchema(BaseModel):
 
 
 class RDBMeta(BaseModel):
-    """Simplified dataset metadata without tasks."""
+    """Relational Database metadata."""
     class Config:
         use_enum_values = True
     

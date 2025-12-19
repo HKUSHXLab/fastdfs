@@ -44,7 +44,7 @@ pip install -e .
 
 ### 1. Prepare Your Data
 
-Structure your relational data as an RDB dataset with a `metadata.yaml` file:
+Structure your relational data as an RDB with a `metadata.yaml` file:
 
 ```yaml
 # metadata.yaml

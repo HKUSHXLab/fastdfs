@@ -1,9 +1,8 @@
 """
-Simplified RDB Dataset implementation without tasks.
+Relational Database (RDB) implementation.
 
-This module implements the new table-centric RDB dataset interface that removes
-the concept of "Tasks" and focuses purely on relational database tables for
-feature engineering.
+This module implements the table-centric RDB interface that focuses purely on
+relational database tables for feature engineering.
 """
 
 from pathlib import Path
@@ -25,7 +24,7 @@ from .meta import (
 __all__ = ['RDB', 'RDBDataset']
 
 class RDB:
-    """Simplified RDB dataset without tasks - focuses on relational tables only."""
+    """Relational Database (RDB) - focuses on relational tables only."""
     
     def __init__(
         self, 
@@ -130,7 +129,7 @@ class RDB:
         return self.metadata.relationships
         
     def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB':
-        """Create new RDBDataset with updated tables (for transforms)."""
+        """Create new RDB with updated tables (for transforms)."""
         # Create a new instance with same metadata but different table data
         new_dataset = RDB.__new__(RDB)
         new_dataset.path = self.path
@@ -139,7 +138,7 @@ class RDB:
         return new_dataset
     
     def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDB':
-        """Create new RDBDataset with updated tables and metadata (for transforms that modify schemas)."""
+        """Create new RDB with updated tables and metadata (for transforms that modify schemas)."""
         # Create a new instance with updated metadata and table data
         new_dataset = RDB.__new__(RDB)
         new_dataset.path = self.path

@@ -37,12 +37,12 @@ class RelBenchAdapter:
 
     def load(self) -> RDB:
         """
-        Load the dataset in-memory for FastDFS.
+        Load the RDB in-memory for FastDFS.
         
         Returns:
-            rdb: RDBDataset instance
+            rdb: RDB instance
         """
-        # 1. Process Data Tables and create RDBDataset
+        # 1. Process Data Tables and create RDB
         logger.info("Processing Data Tables...")
         table_schemas = []
         tables = {}
@@ -61,7 +61,7 @@ class RelBenchAdapter:
         logger.info("Updating Foreign Key Links...")
         table_schemas = self._update_foreign_key_links(table_schemas)
         
-        # Create RDBDataset in-memory
+        # Create RDB in-memory
         dataset_meta = RDBMeta(
             dataset_name=self.dataset_name,
             tables=table_schemas,
@@ -101,7 +101,7 @@ class RelBenchAdapter:
                 logger.info(f"Saved table: {table_name}")
 
         # 4. Create Metadata
-        logger.info("Creating Dataset Metadata...")
+        logger.info("Creating RDB Metadata...")
         dataset_meta = RDBMeta(
             dataset_name=self.dataset_name,
             tables=table_schemas,

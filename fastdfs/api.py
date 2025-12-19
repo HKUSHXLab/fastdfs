@@ -2,7 +2,7 @@
 Minimal API for the table-centric DFS interface.
 
 This module provides the core functions for computing DFS features using
-the simplified RDB dataset interface without task dependencies.
+the RDB interface.
 """
 
 from typing import Dict, Optional, Any
@@ -17,13 +17,13 @@ __all__ = ['load_rdb', 'compute_dfs_features', 'DFSPipeline']
 
 def load_rdb(path: str) -> RDB:
     """
-    Load a relational database dataset.
+    Load a relational database.
     
     Args:
-        path: Path to the RDB dataset directory
+        path: Path to the RDB directory
         
     Returns:
-        RDBDataset instance
+        RDB instance
     """
     return RDB(Path(path))
 
