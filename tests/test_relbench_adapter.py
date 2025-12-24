@@ -8,8 +8,9 @@ from fastdfs.dataset.meta import RDBColumnDType
 
 class TestRelBenchAdapter(unittest.TestCase):
     
+    @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
     @patch('fastdfs.adapter.relbench.get_dataset')
-    def test_load_rel_trial(self, mock_get_dataset):
+    def test_load_rel_trial(self, mock_get_dataset, mock_relbench):
         # Mock RelBench Dataset and Database
         mock_dataset = MagicMock()
         mock_db = MagicMock()
@@ -65,8 +66,9 @@ class TestRelBenchAdapter(unittest.TestCase):
         self.assertNotIn("p_value_raw", outcomes_df.columns)
         self.assertIn("val", outcomes_df.columns)
 
+    @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
     @patch('fastdfs.adapter.relbench.get_dataset')
-    def test_load_rel_stack(self, mock_get_dataset):
+    def test_load_rel_stack(self, mock_get_dataset, mock_relbench):
         # Mock RelBench Dataset and Database
         mock_dataset = MagicMock()
         mock_db = MagicMock()
@@ -100,8 +102,9 @@ class TestRelBenchAdapter(unittest.TestCase):
         self.assertNotIn("WebsiteUrl", users_df.columns)
         self.assertIn("Reputation", users_df.columns)
 
+    @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
     @patch('fastdfs.adapter.relbench.get_dataset')
-    def test_load_relationships(self, mock_get_dataset):
+    def test_load_relationships(self, mock_get_dataset, mock_relbench):
         # Mock RelBench Dataset and Database
         mock_dataset = MagicMock()
         mock_db = MagicMock()
@@ -138,9 +141,10 @@ class TestRelBenchAdapter(unittest.TestCase):
         self.assertEqual(posts_meta.column_dict["owner_uid"].dtype, RDBColumnDType.foreign_key)
         self.assertEqual(posts_meta.column_dict["owner_uid"].link_to, "users.uid")
 
+    @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
     @patch('fastdfs.adapter.relbench.get_dataset')
     @patch('fastdfs.dataset.rdb.RDB.save')
-    def test_load_with_output_dir(self, mock_save, mock_get_dataset):
+    def test_load_with_output_dir(self, mock_save, mock_get_dataset, mock_relbench):
         # Mock RelBench Dataset and Database
         mock_dataset = MagicMock()
         mock_db = MagicMock()
