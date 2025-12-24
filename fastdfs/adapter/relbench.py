@@ -11,6 +11,7 @@ try:
     from relbench.datasets import get_dataset
 except ImportError:
     relbench = None
+    get_dataset = None
 
 class RelBenchAdapter:
     """Adapter for converting RelBench datasets to FastDFS format."""
