@@ -10,6 +10,7 @@ This example shows how to:
 import sys
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -50,9 +51,16 @@ def main():
     ])
     
     # 3. Create target dataframe (following test_dfs_engines.py pattern)
+    # Load actual IDs from the dataset
+    user_data = np.load(rdb_path / "data" / "user.npz", allow_pickle=True)
+    item_data = np.load(rdb_path / "data" / "item.npz", allow_pickle=True)
+    
+    user_ids = user_data['user_id'][:3]
+    item_ids = item_data['item_id'][:3]
+
     target_df = pd.DataFrame({
-        "user_id": [1, 2, 3, 1, 2],
-        "item_id": [1, 2, 3, 2, 1], 
+        "user_id": [user_ids[0], user_ids[1], user_ids[2], user_ids[0], user_ids[1]],
+        "item_id": [item_ids[0], item_ids[1], item_ids[2], item_ids[1], item_ids[0]], 
         "timestamp": pd.to_datetime([
             "2023-01-01 10:00:00",
             "2023-01-02 11:00:00", 

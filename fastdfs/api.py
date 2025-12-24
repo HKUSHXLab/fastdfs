@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .dfs import DFSConfig, get_dfs_engine
 from .dataset.rdb import RDB
-from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat
+from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat, RDBColumnDType
 from .transform.infer_schema import InferSchemaTransform
 
 __all__ = ['load_rdb', 'create_rdb', 'compute_dfs_features', 'DFSPipeline']
@@ -131,6 +131,44 @@ def compute_dfs_features(
     if config is None:
         config = DFSConfig()
     
+    # Validate key types
+    for target_col, rdb_key in key_mappings.items():
+        if target_col not in target_dataframe.columns:
+            raise ValueError(f"Key column '{target_col}' not found in target dataframe.")
+            
+        table_name, col_name = rdb_key.split('.')
+        try:
+            table_meta = rdb.get_table_metadata(table_name)
+        except ValueError:
+            raise ValueError(f"Table '{table_name}' not found in RDB.")
+            
+        if col_name not in table_meta.column_dict:
+            raise ValueError(f"Column '{col_name}' not found in table '{table_name}'.")
+            
+        col_meta = table_meta.column_dict[col_name]
+
+        if col_meta.dtype != RDBColumnDType.primary_key:
+            raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
+
+        if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
+            # Check if target column is string type
+            is_string = pd.api.types.is_string_dtype(target_dataframe[target_col]) or \
+                        pd.api.types.is_object_dtype(target_dataframe[target_col])
+            
+            if not is_string:
+                # Check if values are actually strings if it's object type
+                # (pandas often uses object for strings)
+                # But if it's int64, it's definitely not string.
+                
+                # A stricter check:
+                # If the RDB column is a key, we expect the target column to be string.
+                # We can try to be helpful and suggest casting.
+                raise TypeError(
+                    f"Column '{target_col}' in target dataframe must be of string type to match "
+                    f"RDB key '{rdb_key}'. Current type: {target_dataframe[target_col].dtype}. "
+                    f"Please cast it to string: target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
+                )
+
     # Get the appropriate engine
     engine = get_dfs_engine(config.engine, config)
     

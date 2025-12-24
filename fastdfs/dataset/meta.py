@@ -15,7 +15,7 @@ __all__ = [
 class RDBColumnDType(str, Enum):
     """Column data type model."""
     float_t = 'float'            # np.float32
-    category_t = 'category'      # pandas.Categorical
+    category_t = 'category'      # str
     datetime_t = 'datetime'      # np.datetime64
     text_t = 'text'              # str
     timestamp_t = 'timestamp'    # pandas.Int64 to allow NaN
