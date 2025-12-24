@@ -79,7 +79,7 @@ def main():
         cutoff_time_column="timestamp",
         config_overrides={
             "max_depth": 2,
-            "engine": "featuretools",
+            "engine": "dfs2sql",
             "agg_primitives": ["count", "mean", "max", "min"]
         }
     )

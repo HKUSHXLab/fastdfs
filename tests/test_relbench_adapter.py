@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import pandas as pd
 import numpy as np
+from pathlib import Path
 from fastdfs.adapter.relbench import RelBenchAdapter
 from fastdfs.dataset.meta import RDBColumnDType
 
@@ -136,6 +137,33 @@ class TestRelBenchAdapter(unittest.TestCase):
         posts_meta = rdb.get_table_metadata("posts")
         self.assertEqual(posts_meta.column_dict["owner_uid"].dtype, RDBColumnDType.foreign_key)
         self.assertEqual(posts_meta.column_dict["owner_uid"].link_to, "users.uid")
+
+    @patch('fastdfs.adapter.relbench.get_dataset')
+    @patch('fastdfs.dataset.rdb.RDB.save')
+    def test_load_with_output_dir(self, mock_save, mock_get_dataset):
+        # Mock RelBench Dataset and Database
+        mock_dataset = MagicMock()
+        mock_db = MagicMock()
+        mock_dataset.get_db.return_value = mock_db
+        mock_get_dataset.return_value = mock_dataset
+        
+        # Simple table
+        df_users = pd.DataFrame({"uid": [1, 2]})
+        table_users = MagicMock()
+        table_users.df = df_users
+        table_users.pkey_col = "uid"
+        table_users.time_col = None
+        table_users.fkey_col_to_pkey_table = {}
+        
+        mock_db.table_dict = {"users": table_users}
+        
+        # Initialize Adapter with output_dir
+        output_dir = Path("/tmp/test_output")
+        adapter = RelBenchAdapter(dataset_name="test-save", output_dir=output_dir)
+        rdb = adapter.load()
+        
+        # Verify save was called
+        mock_save.assert_called_once_with(output_dir)
 
 if __name__ == '__main__':
     unittest.main()

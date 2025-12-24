@@ -124,6 +124,10 @@ class RDB:
             raise ValueError(f"Table {table_name} not found in loaded tables.")
         return self.tables[table_name]
 
+    def get_table(self, table_name: str) -> pd.DataFrame:
+        """Alias for get_table_dataframe."""
+        return self.get_table_dataframe(table_name)
+
     def get_relationships(self) -> List[Tuple[str, str, str, str]]:
         """
         Get all foreign key relationships.

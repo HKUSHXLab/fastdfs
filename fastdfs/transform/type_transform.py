@@ -68,12 +68,12 @@ class CanonicalizeTypes(TableTransform):
                 new_table[col_name] = pd.to_numeric(table[col_name], errors='coerce').astype('Int64')
                 
             elif dtype == RDBColumnDType.text_t:
-                # Cast to string/object
+                # Cast to string
                 new_table[col_name] = table[col_name].astype(str)
                 
             elif dtype == RDBColumnDType.category_t:
-                # Cast to category
-                new_table[col_name] = table[col_name].astype('category')
+                # Cast to string
+                new_table[col_name] = table[col_name].astype(str)
                 
             elif dtype in [RDBColumnDType.primary_key, RDBColumnDType.foreign_key]:
                 # Keys are typically strings or integers, but 'object' is safest for mixed types

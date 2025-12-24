@@ -8,6 +8,7 @@ new simplified functional approach to data transformations in FastDFS.
 import abc
 from typing import List, Dict, Optional, Tuple, Union
 import pandas as pd
+from loguru import logger
 
 from ..dataset.meta import RDBColumnSchema, RDBTableSchema
 from ..dataset.rdb import RDB
@@ -101,6 +102,11 @@ class RDBTransformPipeline(RDBTransform):
         """Apply all transforms in sequence."""
         result = rdb
         for transform in self.transforms:
+            transform_name = transform.__class__.__name__
+            if isinstance(transform, RDBTransformWrapper):
+                transform_name = f"RDBTransformWrapper({transform.inner_transform.__class__.__name__})"
+            
+            logger.info(f"Running transform: {transform_name}")
             result = transform(result)
         return result
 

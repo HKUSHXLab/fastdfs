@@ -90,7 +90,8 @@ class DFS2SQLEngine(DFSEngine):
                 dataframe.rename(decode_column_from_sql, axis="columns", inplace=True)
                 dataframes.append(dataframe)
             else:
-                logger.warning(f"SQL execution returned None for: {format_sql(sql.sql())}")
+                # SQLs that produce no result are skipped (e.g., CREATE TABLE)
+                pass
 
         # Merge all feature dataframes
         if dataframes:

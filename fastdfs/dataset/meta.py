@@ -62,6 +62,14 @@ class RDBTableSchema(BaseModel):
         """Get column schemas in a dictionary where the keys are column names."""
         return {col_schema.name: col_schema for col_schema in self.columns}
 
+    @property
+    def primary_key(self) -> Optional[str]:
+        """Get the name of the primary key column."""
+        for col in self.columns:
+            if col.dtype == RDBColumnDType.primary_key:
+                return col.name
+        return None
+
 
 class RDBMeta(BaseModel):
     """Relational Database metadata."""

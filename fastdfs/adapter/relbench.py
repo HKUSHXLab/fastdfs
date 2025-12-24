@@ -1,11 +1,8 @@
-import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union, Tuple
-import os
+from typing import Optional, Dict, Union
 from loguru import logger
 
-from ..dataset.meta import RDBColumnDType
 from ..dataset.rdb import RDB
 from ..api import create_rdb
 
@@ -19,6 +16,14 @@ class RelBenchAdapter:
     """Adapter for converting RelBench datasets to FastDFS format."""
 
     def __init__(self, dataset_name: str, output_dir: Optional[Union[str, Path]] = None):
+        """
+        Initialize the RelBench adapter.
+
+        Args:
+            dataset_name: Name of the RelBench dataset (e.g., "rel-trial", "rel-stack").
+            output_dir: Optional directory path to save the adapted RDB. 
+                        If provided, the RDB will be saved to this directory after loading.
+        """
         if relbench is None:
             raise ImportError("relbench is not installed. Please install it with `pip install relbench`.")
         
@@ -78,6 +83,10 @@ class RelBenchAdapter:
             time_columns=time_columns,
             type_hints=type_hints
         )
+        
+        if self.output_dir:
+            logger.info(f"Saving RDB to {self.output_dir}...")
+            rdb.save(self.output_dir)
         
         return rdb
 

@@ -49,7 +49,7 @@ class DFSConfig(pydantic.BaseModel):
     ]
     max_depth: int = 2
     use_cutoff_time: bool = True
-    engine: str = "featuretools"
+    engine: str = "dfs2sql"
     engine_path: Optional[str] = None
     trans_primitives: List[str] = []
     where_primitives: List[str] = []
