@@ -1,3 +1,5 @@
+# This code is adapted from https://github.com/awslabs/multi-table-benchmark
+#
 # Copyright 2024 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License").
