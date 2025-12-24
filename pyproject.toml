@@ -55,6 +55,7 @@ dependencies = [
     "psutil",
     "loguru",
     "boto3",
+    "requests",
 ]
 
 [project.optional-dependencies]
