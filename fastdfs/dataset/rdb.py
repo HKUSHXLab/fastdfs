@@ -1,13 +1,12 @@
 """
-Simplified RDB Dataset implementation without tasks.
+Relational Database (RDB) implementation.
 
-This module implements the new table-centric RDB dataset interface that removes
-the concept of "Tasks" and focuses purely on relational database tables for
-feature engineering.
+This module implements the table-centric RDB interface that focuses purely on
+relational database tables for feature engineering.
 """
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Union
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
@@ -15,24 +14,36 @@ from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateT
 from ..utils import yaml_utils
 from .loader import get_table_data_loader
 from .meta import (
-    RDBDatasetMeta,
+    RDBMeta,
     RDBTableSchema,
     RDBColumnDType,
     RDBColumnSchema,
     RDBTableDataFormat,
 )
 
-__all__ = ['RDBDataset']
+__all__ = ['RDB', 'RDBDataset']
 
-class RDBDataset:
-    """Simplified RDB dataset without tasks - focuses on relational tables only."""
+class RDB:
+    """Relational Database (RDB) - focuses on relational tables only."""
     
-    def __init__(self, path: Path):
-        self.path = Path(path)
-        self.metadata = self._load_metadata()
-        self.tables = self._load_tables()
+    def __init__(
+        self, 
+        path: Optional[Path] = None, 
+        metadata: Optional[RDBMeta] = None, 
+        tables: Optional[Dict[str, pd.DataFrame]] = None
+    ):
+        if path:
+            self.path = Path(path)
+            self.metadata = self._load_metadata()
+            self.tables = self._load_tables()
+        elif metadata is not None and tables is not None:
+            self.path = None
+            self.metadata = metadata
+            self.tables = tables
+        else:
+            raise ValueError("Either path or (metadata and tables) must be provided.")
     
-    def _load_metadata(self) -> RDBDatasetMeta:
+    def _load_metadata(self) -> RDBMeta:
         """Load metadata from YAML file."""
         metadata_path = self.path / 'metadata.yaml'
         if not metadata_path.exists():
@@ -56,8 +67,8 @@ class RDBDataset:
             )
             tables.append(table_schema)
         
-        return RDBDatasetMeta(
-            dataset_name=raw_data['dataset_name'],
+        return RDBMeta(
+            name=raw_data['name'],
             tables=tables
         )
     
@@ -94,42 +105,69 @@ class RDBDataset:
             tables[table_schema.name] = pd.DataFrame(df_data)
         
         return tables
-    
+
     @property
     def table_names(self) -> List[str]:
         """Get list of table names."""
-        return list(self.tables.keys())
-    
-    def get_table(self, name: str) -> pd.DataFrame:
-        """Get a table as a pandas DataFrame."""
-        if name not in self.tables:
-            raise ValueError(f"Table {name} not found. Available tables: {self.table_names}")
-        return self.tables[name].copy()
-    
-    def get_table_metadata(self, name: str) -> RDBTableSchema:
+        return [t.name for t in self.metadata.tables]
+
+    def get_table_metadata(self, table_name: str) -> RDBTableSchema:
         """Get metadata for a specific table."""
-        for table_schema in self.metadata.tables:
-            if table_schema.name == name:
-                return table_schema
-        raise ValueError(f"Table {name} not found. Available tables: {self.table_names}")
-        
+        for table in self.metadata.tables:
+            if table.name == table_name:
+                return table
+        raise ValueError(f"Table {table_name} not found in metadata.")
+
+    def get_table_dataframe(self, table_name: str) -> pd.DataFrame:
+        """Get pandas DataFrame for a specific table."""
+        if table_name not in self.tables:
+            raise ValueError(f"Table {table_name} not found in loaded tables.")
+        return self.tables[table_name]
+
+    def get_table(self, table_name: str) -> pd.DataFrame:
+        """Alias for get_table_dataframe."""
+        return self.get_table_dataframe(table_name)
+
     def get_relationships(self) -> List[Tuple[str, str, str, str]]:
-        """Get relationships as (child_table, child_col, parent_table, parent_col)."""
-        return self.metadata.relationships
+        """
+        Get all foreign key relationships.
         
-    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDBDataset':
-        """Create new RDBDataset with updated tables (for transforms)."""
-        # Create a new instance with same metadata but different table data
-        new_dataset = RDBDataset.__new__(RDBDataset)
-        new_dataset.path = self.path
-        new_dataset.metadata = self.metadata
-        new_dataset.tables = new_tables.copy()
-        return new_dataset
-    
-    def create_new_with_tables_and_metadata(self, new_tables: Dict[str, pd.DataFrame], new_metadata: Dict[str, RDBTableSchema]) -> 'RDBDataset':
-        """Create new RDBDataset with updated tables and metadata (for transforms that modify schemas)."""
+        Returns:
+            List of (child_table, child_col, parent_table, parent_col) tuples.
+        """
+        return self.metadata.relationships
+
+    def save(self, path: Union[str, Path]):
+        """
+        Save the RDB to a directory.
+        
+        Args:
+            path: Directory path to save the RDB.
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        
+        # Save tables
+        for table_name, df in self.tables.items():
+            # We assume parquet format for now as it is the default
+            output_path = path / f"{table_name}.parquet"
+            df.to_parquet(output_path)
+            
+        # Save metadata
+        yaml_utils.save_yaml(self.metadata.model_dump(mode='json'), path / "metadata.yaml")
+
+    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB':
+        """Create new RDB with updated tables (keeping existing metadata)."""
+        return self.create_new_with_tables_and_metadata(new_tables, {})
+
+    def create_new_with_tables_and_metadata(
+        self, 
+        new_tables: Dict[str, pd.DataFrame], 
+        new_metadata: Dict[str, RDBTableSchema]
+    ) -> 'RDB':
+        """Create new RDB with updated tables and metadata (for transforms that modify schemas)."""
         # Create a new instance with updated metadata and table data
-        new_dataset = RDBDataset.__new__(RDBDataset)
+        new_dataset = RDB.__new__(RDB)
         new_dataset.path = self.path
         new_dataset.tables = new_tables.copy()
         
@@ -148,8 +186,8 @@ class RDBDataset:
                 updated_table_schemas.append(schema)
         
         # Create new metadata object
-        new_dataset.metadata = RDBDatasetMeta(
-            dataset_name=self.metadata.dataset_name,
+        new_dataset.metadata = RDBMeta(
+            name=self.metadata.name,
             tables=updated_table_schemas
         )
         
@@ -216,7 +254,7 @@ def convert_task_dataset_to_rdb(old_dataset_path: Path, rdb_output_path: Path):
     
     # Convert metadata (tables only, no tasks)
     new_metadata = {
-        'dataset_name': old_dataset.metadata.dataset_name,
+        'name': old_dataset.metadata.dataset_name,
         'tables': []
     }
     
@@ -295,3 +333,5 @@ def extract_target_tables_from_tasks(old_dataset_path: Path, output_dir: Path):
             target_df.to_parquet(output_file, index=False)
             
             print(f"Extracted {task.metadata.name} {split_name} to {output_file}")
+
+RDBDataset = RDB  # Alias for backward compatibility

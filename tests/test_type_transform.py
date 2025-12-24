@@ -45,7 +45,7 @@ def test_canonicalize_types_basic(sample_metadata):
     assert pd.api.types.is_float_dtype(new_df["value_float"])
     assert pd.api.types.is_integer_dtype(new_df["value_int"])
     assert pd.api.types.is_datetime64_any_dtype(new_df["date"])
-    assert isinstance(new_df["category"].dtype, pd.CategoricalDtype)
+    assert pd.api.types.is_string_dtype(new_df["category"])
     assert pd.api.types.is_string_dtype(new_df["text"])
 
     # Check values

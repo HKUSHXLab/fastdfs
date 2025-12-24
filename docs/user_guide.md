@@ -5,7 +5,7 @@
 1. [Introduction](#introduction)
 2. [Core Concepts](#core-concepts)
 3. [Getting Started](#getting-started)
-4. [RDB Dataset Format](#rdb-dataset-format)
+4. [RDB Format](#rdb-format)
 5. [Basic Usage](#basic-usage)
 6. [Transform Pipeline](#transform-pipeline)
 7. [Advanced Configuration](#advanced-configuration)
@@ -109,7 +109,7 @@ ecommerce_rdb/
 
 **metadata.yaml**:
 ```yaml
-dataset_name: ecommerce_rdb
+name: ecommerce_rdb
 tables:
 - name: users
   source: data/users.npz
@@ -180,14 +180,14 @@ print(f"Generated {len(features.columns)} total features")
 print(f"New features: {len(features.columns) - len(target_df.columns)}")
 ```
 
-## RDB Dataset Format
+## RDB Format
 
 ### Metadata Schema
 
 The `metadata.yaml` file defines your RDB structure:
 
 ```yaml
-dataset_name: your_dataset_name  # Required: Name of the dataset
+name: your_dataset_name  # Required: Name of the dataset
 
 tables:                          # Required: List of tables
 - name: table_name              # Required: Table name
@@ -243,7 +243,7 @@ import fastdfs
 rdb = fastdfs.load_rdb("path/to/rdb/")
 
 # Inspect the RDB
-print(f"Dataset: {rdb.metadata.dataset_name}")
+print(f"Dataset: {rdb.metadata.name}")
 print(f"Tables: {rdb.table_names}")
 print(f"Relationships: {rdb.get_relationships()}")
 

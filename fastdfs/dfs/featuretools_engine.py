@@ -9,7 +9,7 @@ import tqdm
 from loguru import logger
 
 from .base_engine import DFSEngine, DFSConfig, dfs_engine
-from ..dataset.rdb import RDBDataset
+from ..dataset.rdb import RDB
 
 __all__ = ['FeaturetoolsEngine']
 
@@ -22,7 +22,7 @@ class FeaturetoolsEngine(DFSEngine):
     
     def compute_feature_matrix(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str],

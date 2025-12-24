@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastdfs.dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableDataFormat
-from fastdfs.dataset.rdb import RDBDataset, RDBTableSchema, RDBDatasetMeta
+from fastdfs.dataset.rdb import RDB, RDBTableSchema, RDBMeta
 from fastdfs.transform.base import RDBTransform, TableTransform, ColumnTransform
 from fastdfs.transform.datetime_transform import FeaturizeDatetime
 from fastdfs.transform.filter_transform import FilterColumn
@@ -29,7 +29,7 @@ class TestFeaturizeDatetime:
     def setup_class(cls):
         """Set up test dataset."""
         test_data_path = Path(__file__).parent / "data" / "test_rdb_new"
-        cls.dataset = RDBDataset(test_data_path)
+        cls.dataset = RDB(test_data_path)
         
         # Get interaction table which has datetime column
         cls.interaction_table = cls.dataset.get_table('interaction')
@@ -110,7 +110,7 @@ class TestFilterColumn:
     def setup_class(cls):
         """Set up test dataset with synthetic columns."""
         test_data_path = Path(__file__).parent / "data" / "test_rdb_new"
-        cls.original_dataset = RDBDataset(test_data_path)
+        cls.original_dataset = RDB(test_data_path)
         cls.transform = FilterColumn(drop_dtypes=[RDBColumnDType.text_t], drop_redundant=True)
         
         # Create test dataset with synthetic columns added
@@ -178,7 +178,7 @@ class TestFilterColumn:
         
         # Create enhanced metadata with synthetic columns
         enhanced_metadata = {
-            'dataset_name': 'test_with_synthetic',
+            'name': 'test_with_synthetic',
             'tables': [
                 {
                     'name': 'user',
@@ -229,7 +229,7 @@ class TestFilterColumn:
         yaml_utils.save_yaml(enhanced_metadata, metadata_path)
         
         # Load and return the dataset
-        return RDBDataset(temp_path)
+        return RDB(temp_path)
     
     def test_preserve_primary_keys(self):
         """Test that primary keys are always preserved."""
@@ -350,7 +350,7 @@ class TestHandleDummyTable:
     def setup_class(cls):
         """Set up test dataset."""
         test_data_path = Path(__file__).parent / "data" / "test_rdb_new"
-        cls.original_dataset = RDBDataset(test_data_path)
+        cls.original_dataset = RDB(test_data_path)
         cls.transform = HandleDummyTable()
         cls.temp_dir = None
     
@@ -386,7 +386,7 @@ class TestHandleDummyTable:
         ]
         
         incomplete_metadata = {
-            'dataset_name': f'test_missing_{missing_table_name}',
+            'name': f'test_missing_{missing_table_name}',
             'tables': filtered_tables
         }
         
@@ -395,7 +395,7 @@ class TestHandleDummyTable:
         yaml_utils.save_yaml(incomplete_metadata, metadata_path)
         
         # Load and return the incomplete dataset
-        return RDBDataset(temp_path)
+        return RDB(temp_path)
     
     def test_no_missing_tables_in_complete_dataset(self):
         """Test that transform is no-op when all referenced tables exist."""

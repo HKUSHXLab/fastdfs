@@ -26,7 +26,7 @@ Load a relational database dataset from a directory.
 import fastdfs
 
 rdb = fastdfs.load_rdb("path/to/ecommerce_rdb/")
-print(f"Loaded dataset: {rdb.metadata.dataset_name}")
+print(f"Loaded dataset: {rdb.metadata.name}")
 print(f"Tables: {rdb.table_names}")
 ```
 
@@ -142,8 +142,8 @@ class DFSConfig(pydantic.BaseModel):
     agg_primitives: List[str] = ["max", "min", "mean", "count", "mode", "std"]
     max_depth: int = 2
     use_cutoff_time: bool = True
-    engine: str = "featuretools"
-    engine_path: Optional[str] = "/tmp/duck.db"
+    engine: str = "dfs2sql"
+    engine_path: Optional[str] = None
 ```
 
 **Attributes:**

@@ -11,7 +11,7 @@ import numpy as np
 from pathlib import Path
 
 from fastdfs.dfs import DFSConfig, get_dfs_engine, FeaturetoolsEngine, DFS2SQLEngine
-from fastdfs.dataset.rdb import RDBDataset
+from fastdfs.dataset.rdb import RDB
 from fastdfs.api import load_rdb, compute_dfs_features, DFSPipeline
 
 
@@ -23,7 +23,7 @@ def test_data_path():
 @pytest.fixture
 def rdb_dataset(test_data_path):
     """Load RDB dataset directly from new test data."""
-    return RDBDataset(test_data_path)
+    return RDB(test_data_path)
 
 @pytest.fixture
 def target_dataframe(rdb_dataset):
@@ -202,7 +202,7 @@ class TestDFSConfig:
 
         assert config.max_depth == 2
         assert config.use_cutoff_time == True
-        assert config.engine == "featuretools"
+        assert config.engine == "dfs2sql"
         assert "count" in config.agg_primitives
         assert "mean" in config.agg_primitives
 
@@ -490,7 +490,7 @@ class TestHighLevelAPI:
     def test_load_rdb(self, test_data_path):
         """Test loading RDB using high-level API."""
         rdb = load_rdb(str(test_data_path))
-        assert isinstance(rdb, RDBDataset)
+        assert isinstance(rdb, RDB)
         assert len(rdb.table_names) == 3
 
     def test_compute_dfs_features_default_config(self, rdb_dataset, target_dataframe, key_mappings):

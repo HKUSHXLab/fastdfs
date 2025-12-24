@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 
 from fastdfs.dataset.rdb import (
-    RDBDataset, 
+    RDB, 
     convert_task_dataset_to_rdb,
     extract_target_tables_from_tasks
 )
@@ -37,11 +37,11 @@ class TestRDBDataset:
             convert_task_dataset_to_rdb(test_data_path, rdb_path)
             
             # Load the converted RDB dataset
-            yield RDBDataset(rdb_path)
+            yield RDB(rdb_path)
     
     def test_load_rdb_dataset(self, rdb_dataset):
         """Test that RDB dataset loads correctly."""
-        assert rdb_dataset.metadata.dataset_name == "sbm_user_item"
+        assert rdb_dataset.metadata.name == "sbm_user_item"
         assert len(rdb_dataset.table_names) == 3
         assert set(rdb_dataset.table_names) == {"user", "item", "interaction"}
     
@@ -186,8 +186,8 @@ class TestDatasetMigration:
             assert interaction_data_path.exists()
             
             # Test that converted dataset can be loaded
-            rdb_dataset = RDBDataset(rdb_output_path)
-            assert rdb_dataset.metadata.dataset_name == "sbm_user_item"
+            rdb_dataset = RDB(rdb_output_path)
+            assert rdb_dataset.metadata.name == "sbm_user_item"
             assert len(rdb_dataset.table_names) == 3
     
     def test_extract_target_tables_from_tasks(self, test_data_path):
@@ -232,7 +232,7 @@ class TestRDBDatasetEdgeCases:
             empty_path.mkdir()
             
             with pytest.raises(FileNotFoundError, match="Metadata file not found"):
-                RDBDataset(empty_path)
+                RDB(empty_path)
     
     def test_missing_data_file(self):
         """Test error when table data file is missing."""
@@ -242,7 +242,7 @@ class TestRDBDatasetEdgeCases:
             
             # Create metadata with reference to non-existent data file
             metadata = {
-                "dataset_name": "test",
+                "name": "test",
                 "tables": [
                     {
                         "name": "test_table",
@@ -260,7 +260,7 @@ class TestRDBDatasetEdgeCases:
                 yaml.dump(metadata, f)
             
             with pytest.raises(FileNotFoundError, match="Table data file not found"):
-                RDBDataset(dataset_path)
+                RDB(dataset_path)
     
     def test_missing_column_in_data(self, test_data_path):
         """Test error when metadata references column not in data."""
@@ -275,7 +275,7 @@ class TestRDBDatasetEdgeCases:
             
             # Create metadata with reference to non-existent column
             metadata = {
-                "dataset_name": "test",
+                "name": "test",
                 "tables": [
                     {
                         "name": "user",
@@ -294,4 +294,4 @@ class TestRDBDatasetEdgeCases:
                 yaml.dump(metadata, f)
             
             with pytest.raises(ValueError, match="Column nonexistent_column not found"):
-                RDBDataset(dataset_path)
+                RDB(dataset_path)

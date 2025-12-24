@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from fastdfs.api import compute_dfs_features
-from fastdfs.dataset.rdb import RDBDataset
+from fastdfs.dataset.rdb import RDB
 from fastdfs.dfs import DFSConfig
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def test_data_path():
 @pytest.fixture
 def rdb_dataset(test_data_path):
     """Load RDB dataset directly from new test data."""
-    return RDBDataset(test_data_path)
+    return RDB(test_data_path)
 
 @pytest.fixture
 def complex_target_dataframe(rdb_dataset):

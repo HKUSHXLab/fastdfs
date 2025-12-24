@@ -2,34 +2,95 @@
 Minimal API for the table-centric DFS interface.
 
 This module provides the core functions for computing DFS features using
-the simplified RDB dataset interface without task dependencies.
+the RDB interface.
 """
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Tuple
 import pandas as pd
 from pathlib import Path
 
 from .dfs import DFSConfig, get_dfs_engine
-from .dataset.rdb import RDBDataset
+from .dataset.rdb import RDB
+from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat, RDBColumnDType
+from .transform.infer_schema import InferSchemaTransform
 
-__all__ = ['load_rdb', 'compute_dfs_features', 'DFSPipeline']
+__all__ = ['load_rdb', 'create_rdb', 'compute_dfs_features', 'DFSPipeline']
 
 
-def load_rdb(path: str) -> RDBDataset:
+def load_rdb(path: str) -> RDB:
     """
-    Load a relational database dataset.
+    Load a relational database.
     
     Args:
-        path: Path to the RDB dataset directory
+        path: Path to the RDB directory
         
     Returns:
-        RDBDataset instance
+        RDB instance
     """
-    return RDBDataset(Path(path))
+    return RDB(Path(path))
+
+
+def create_rdb(
+    tables: Dict[str, pd.DataFrame],
+    name: str = "myrdb",
+    primary_keys: Optional[Dict[str, str]] = None,
+    foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
+    time_columns: Optional[Dict[str, str]] = None,
+    type_hints: Optional[Dict[str, Dict[str, str]]] = None
+) -> RDB:
+    """
+    Create an RDB from a dictionary of pandas DataFrames.
+    
+    This function automatically infers the schema (column types) from the dataframes,
+    using the provided metadata (keys, time columns) as hints.
+    
+    Args:
+        tables: Dictionary mapping table names to pandas DataFrames.
+        name: Name of the RDB.
+        primary_keys: Dictionary mapping table names to their primary key column name.
+        foreign_keys: List of relationships as (child_table, child_col, parent_table, parent_col).
+        time_columns: Dictionary mapping table names to their time column name.
+        type_hints: Dictionary mapping table names to a dictionary of {column_name: dtype_str}.
+                    Useful for overriding inferred types.
+                    
+    Returns:
+        RDB: An initialized RDB object with inferred schema.
+    """
+    # Create initial empty schemas
+    table_schemas = []
+    for table_name in tables.keys():
+        # We create a minimal schema with just the name and format
+        # The columns will be populated by the transform
+        schema = RDBTableSchema(
+            name=table_name,
+            source=f"{table_name}.parquet", # Placeholder
+            format=RDBTableDataFormat.PARQUET,
+            columns=[] # Empty initially
+        )
+        table_schemas.append(schema)
+        
+    metadata = RDBMeta(
+        name=name,
+        tables=table_schemas
+    )
+    
+    rdb = RDB(metadata=metadata, tables=tables)
+    
+    # Apply inference transform
+    transform = InferSchemaTransform(
+        primary_keys=primary_keys,
+        foreign_keys=foreign_keys,
+        time_columns=time_columns,
+        type_hints=type_hints
+    )
+    
+    rdb = transform(rdb)
+    
+    return rdb
 
 
 def compute_dfs_features(
-    rdb: RDBDataset,
+    rdb: RDB,
     target_dataframe: pd.DataFrame,
     key_mappings: Dict[str, str],
     cutoff_time_column: Optional[str] = None,
@@ -70,6 +131,44 @@ def compute_dfs_features(
     if config is None:
         config = DFSConfig()
     
+    # Validate key types
+    for target_col, rdb_key in key_mappings.items():
+        if target_col not in target_dataframe.columns:
+            raise ValueError(f"Key column '{target_col}' not found in target dataframe.")
+            
+        table_name, col_name = rdb_key.split('.')
+        try:
+            table_meta = rdb.get_table_metadata(table_name)
+        except ValueError:
+            raise ValueError(f"Table '{table_name}' not found in RDB.")
+            
+        if col_name not in table_meta.column_dict:
+            raise ValueError(f"Column '{col_name}' not found in table '{table_name}'.")
+            
+        col_meta = table_meta.column_dict[col_name]
+
+        if col_meta.dtype != RDBColumnDType.primary_key:
+            raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
+
+        if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
+            # Check if target column is string type
+            is_string = pd.api.types.is_string_dtype(target_dataframe[target_col]) or \
+                        pd.api.types.is_object_dtype(target_dataframe[target_col])
+            
+            if not is_string:
+                # Check if values are actually strings if it's object type
+                # (pandas often uses object for strings)
+                # But if it's int64, it's definitely not string.
+                
+                # A stricter check:
+                # If the RDB column is a key, we expect the target column to be string.
+                # We can try to be helpful and suggest casting.
+                raise TypeError(
+                    f"Column '{target_col}' in target dataframe must be of string type to match "
+                    f"RDB key '{rdb_key}'. Current type: {target_dataframe[target_col].dtype}. "
+                    f"Please cast it to string: target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
+                )
+
     # Get the appropriate engine
     engine = get_dfs_engine(config.engine, config)
     
@@ -108,7 +207,7 @@ class DFSPipeline:
     
     def compute_features(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,

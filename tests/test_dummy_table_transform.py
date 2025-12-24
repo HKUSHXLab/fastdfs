@@ -2,14 +2,14 @@ import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
 from fastdfs.transform.dummy_table_transform import HandleDummyTable
-from fastdfs.dataset.rdb import RDBDataset
+from fastdfs.dataset.rdb import RDB
 from fastdfs.dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema, RDBTableDataFormat
 
 class TestHandleDummyTable:
     
     def setup_method(self):
         self.transform = HandleDummyTable()
-        self.mock_dataset = MagicMock(spec=RDBDataset)
+        self.mock_dataset = MagicMock(spec=RDB)
         self.mock_dataset.table_names = ['table1', 'table2']
 
     def test_collect_foreign_key_references_corner_cases(self):

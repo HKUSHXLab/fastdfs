@@ -9,14 +9,14 @@ in fastdfs/preprocess/transform/dummy_table.py.
 from typing import Dict, List, Set, Union, Any
 import pandas as pd
 from ..dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema, RDBTableDataFormat
-from ..dataset.rdb import RDBDataset
+from ..dataset.rdb import RDB
 from .base import RDBTransform
 
 
 class HandleDummyTable(RDBTransform):
     """Create dummy tables for missing primary key references."""
     
-    def __call__(self, dataset: RDBDataset) -> RDBDataset:
+    def __call__(self, dataset: RDB) -> RDB:
         """Create missing primary key tables from foreign key references."""
         # Get current relationships
         relationships = dataset.get_relationships()
@@ -48,7 +48,7 @@ class HandleDummyTable(RDBTransform):
             new_metadata=new_metadata
         )
     
-    def _collect_foreign_key_references(self, dataset: RDBDataset, relationships: List) -> Dict[str, Dict[str, Union[str, List]]]:
+    def _collect_foreign_key_references(self, dataset: RDB, relationships: List) -> Dict[str, Dict[str, Union[str, List]]]:
         """Collect all foreign key column references and their target tables.
         
         Returns:
@@ -71,7 +71,7 @@ class HandleDummyTable(RDBTransform):
         return fk_refs
     
     def _find_missing_primary_tables(self, fk_refs: Dict[str, Dict[str, Any]],
-                                   dataset: RDBDataset) -> List[tuple]:
+                                   dataset: RDB) -> List[tuple]:
         """Find which primary key tables are missing and collect their values."""
         missing_tables = []
         

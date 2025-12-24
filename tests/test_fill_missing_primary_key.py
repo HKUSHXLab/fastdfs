@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from unittest.mock import MagicMock
 from fastdfs.transform.fill_missing_pk import FillMissingPrimaryKey
-from fastdfs.dataset.rdb import RDBDataset
+from fastdfs.dataset.rdb import RDB
 from fastdfs.dataset.meta import (
     RDBColumnSchema, 
     RDBColumnDType, 
@@ -47,7 +47,7 @@ class TestFillMissingPrimaryKey:
         Returns:
             Mock RDBDataset
         """
-        mock_rdb = MagicMock(spec=RDBDataset)
+        mock_rdb = MagicMock(spec=RDB)
         
         # Setup table names
         mock_rdb.table_names = list(tables_data.keys())

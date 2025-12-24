@@ -8,13 +8,14 @@ __all__ = [
     "RDBColumnSchema",
     "RDBTableDataFormat",
     "RDBTableSchema",
-    "RDBDatasetMeta"
+    "RDBMeta",
+    "RDBDatasetMeta",
 ]
 
 class RDBColumnDType(str, Enum):
     """Column data type model."""
     float_t = 'float'            # np.float32
-    category_t = 'category'      # pandas.Categorical
+    category_t = 'category'      # str
     datetime_t = 'datetime'      # np.datetime64
     text_t = 'text'              # str
     timestamp_t = 'timestamp'    # pandas.Int64 to allow NaN
@@ -39,14 +40,14 @@ class RDBColumnSchema(BaseModel):
     # Column name.
     name : str
     # Column data type
-    dtype : RDBColumnDType
+    dtype : Optional[RDBColumnDType] = None
 
 class RDBTableDataFormat(str, Enum):
     PARQUET = 'parquet'
     NUMPY = 'numpy'
 
 class RDBTableSchema(BaseModel):
-    """Simplified table schema without task-specific metadata."""
+    """Table schema definition."""
     class Config:
         use_enum_values = True
     
@@ -61,13 +62,21 @@ class RDBTableSchema(BaseModel):
         """Get column schemas in a dictionary where the keys are column names."""
         return {col_schema.name: col_schema for col_schema in self.columns}
 
+    @property
+    def primary_key(self) -> Optional[str]:
+        """Get the name of the primary key column."""
+        for col in self.columns:
+            if col.dtype == RDBColumnDType.primary_key:
+                return col.name
+        return None
 
-class RDBDatasetMeta(BaseModel):
-    """Simplified dataset metadata without tasks."""
+
+class RDBMeta(BaseModel):
+    """Relational Database metadata."""
     class Config:
         use_enum_values = True
     
-    dataset_name: str
+    name: str  # Name of the RDB
     tables: List[RDBTableSchema]
     
     @property
@@ -85,3 +94,5 @@ class RDBDatasetMeta(BaseModel):
                         parent_col     # parent column
                     ))
         return relationships
+
+RDBDatasetMeta = RDBMeta  # Alias for backward compatibility
