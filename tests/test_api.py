@@ -20,13 +20,21 @@ class TestPhase4API:
         return Path(__file__).parent / "data" / "test_rdb_new"
     
     @pytest.fixture
-    def sample_target_df(self):
+    def sample_target_df(self, test_rdb_path):
         """Sample target dataframe for testing."""
+        # Load actual IDs from the dataset
+        import numpy as np
+        user_data = np.load(test_rdb_path / "data" / "user.npz", allow_pickle=True)
+        item_data = np.load(test_rdb_path / "data" / "item.npz", allow_pickle=True)
+        
+        user_ids = user_data['user_id'][:3]
+        item_ids = item_data['item_id'][:3]
+
         return pd.DataFrame({
-            "user_id": [1, 2, 3, 1, 2],
-            "item_id": [1, 2, 3, 2, 1],
+            "user_id": [user_ids[0], user_ids[1], user_ids[2], user_ids[0], user_ids[1]],
+            "item_id": [item_ids[0], item_ids[1], item_ids[2], item_ids[1], item_ids[0]],
             "timestamp": pd.to_datetime([
-                "2023-01-01 10:00:00",
+                "2023-01-01 10:00:00", 
                 "2023-01-02 11:00:00", 
                 "2023-01-03 12:00:00",
                 "2023-01-04 13:00:00",

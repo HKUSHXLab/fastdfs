@@ -156,6 +156,10 @@ class RDB:
         # Save metadata
         yaml_utils.save_yaml(self.metadata.model_dump(mode='json'), path / "metadata.yaml")
 
+    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB':
+        """Create new RDB with updated tables (keeping existing metadata)."""
+        return self.create_new_with_tables_and_metadata(new_tables, {})
+
     def create_new_with_tables_and_metadata(
         self, 
         new_tables: Dict[str, pd.DataFrame], 
@@ -250,7 +254,7 @@ def convert_task_dataset_to_rdb(old_dataset_path: Path, rdb_output_path: Path):
     
     # Convert metadata (tables only, no tasks)
     new_metadata = {
-        'dataset_name': old_dataset.metadata.dataset_name,
+        'name': old_dataset.metadata.dataset_name,
         'tables': []
     }
     

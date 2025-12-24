@@ -1,4 +1,4 @@
-dataset_name: sbm_user_item
+name: sbm_user_item
 tables:
 - columns:
   - dtype: primary_key

@@ -178,7 +178,7 @@ class TestFilterColumn:
         
         # Create enhanced metadata with synthetic columns
         enhanced_metadata = {
-            'dataset_name': 'test_with_synthetic',
+            'name': 'test_with_synthetic',
             'tables': [
                 {
                     'name': 'user',
@@ -386,7 +386,7 @@ class TestHandleDummyTable:
         ]
         
         incomplete_metadata = {
-            'dataset_name': f'test_missing_{missing_table_name}',
+            'name': f'test_missing_{missing_table_name}',
             'tables': filtered_tables
         }
         

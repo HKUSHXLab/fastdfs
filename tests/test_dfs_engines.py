@@ -202,7 +202,7 @@ class TestDFSConfig:
 
         assert config.max_depth == 2
         assert config.use_cutoff_time == True
-        assert config.engine == "featuretools"
+        assert config.engine == "dfs2sql"
         assert "count" in config.agg_primitives
         assert "mean" in config.agg_primitives
 

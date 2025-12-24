@@ -41,7 +41,7 @@ class TestRDBDataset:
     
     def test_load_rdb_dataset(self, rdb_dataset):
         """Test that RDB dataset loads correctly."""
-        assert rdb_dataset.metadata.dataset_name == "sbm_user_item"
+        assert rdb_dataset.metadata.name == "sbm_user_item"
         assert len(rdb_dataset.table_names) == 3
         assert set(rdb_dataset.table_names) == {"user", "item", "interaction"}
     
@@ -242,7 +242,7 @@ class TestRDBDatasetEdgeCases:
             
             # Create metadata with reference to non-existent data file
             metadata = {
-                "dataset_name": "test",
+                "name": "test",
                 "tables": [
                     {
                         "name": "test_table",
@@ -275,7 +275,7 @@ class TestRDBDatasetEdgeCases:
             
             # Create metadata with reference to non-existent column
             metadata = {
-                "dataset_name": "test",
+                "name": "test",
                 "tables": [
                     {
                         "name": "user",
