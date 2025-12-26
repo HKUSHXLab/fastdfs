@@ -72,3 +72,38 @@ rdb = adapter.load()
 2. **Phase 2**: Implement `PostgreSQLAdapter` and `MySQLAdapter`.
 3. **Phase 3**: Implement `DuckDBAdapter` with native optimizations.
 4. **Phase 4**: Integration tests and documentation updates.
+
+## 7. Implementation Updates & Deviations
+
+### 7.1 User-Provided Metadata Hints
+- **Change**: Added support for manual metadata overrides in `SQLAdapter` and all subclasses.
+- **Reason**: Real-world databases often lack explicit foreign key constraints or require specific columns to be designated as time indices for DFS.
+- **Implementation**:
+    - Added `primary_keys`, `foreign_keys`, `time_columns`, and `type_hints` arguments to `__init__`.
+    - These hints take precedence over auto-discovered metadata.
+    - Implemented in `sql_base.py` and `duckdb.py`.
+
+### 7.2 Native DuckDB Metadata Discovery
+- **Change**: `DuckDBAdapter` uses native SQL queries (`PRAGMA table_info`, `PRAGMA foreign_key_list`) instead of SQLAlchemy for metadata discovery.
+- **Reason**: To maintain a lightweight dependency profile and leverage DuckDB's native capabilities fully without relying on the SQLAlchemy dialect for DuckDB.
+
+### 7.3 DFS Engine Robustness
+- **Change**: Patched `fastdfs/dfs/base_engine.py` and `fastdfs/dfs/featuretools_engine.py`.
+- **Reason**: Integration testing with the MySQL adapter revealed issues when using `TransformFeature` (e.g., `MONTH(date)`) as keys and handling cutoff times.
+- **Fixes**:
+    - Updated `base_feature_is_key` to handle `TransformFeature` recursively.
+    - Ensured cutoff time columns are preserved in the target dataframe passed to Featuretools to avoid `KeyError`.
+
+### 7.4 Validation Example
+- **Change**: Created `examples/mysql_finance_example.py`.
+- **Details**: A complete end-to-end example using the CTU Financial dataset hosted on a remote MySQL server. This validates connection handling, schema discovery, hint application, and DFS feature computation in a realistic setting.
+
+## 8. Documentation Updates
+
+### 8.1 README Update
+- **Summary**: Updated `README.md` to feature the new SQL Adapter capabilities instead of the manual schema definition method.
+- **Changes**:
+    - Replaced "Option C: Manual Schema Definition" with "Option C: Load from Relational Database".
+    - Added code examples for `SQLiteAdapter` and mentioned support for MySQL, PostgreSQL, and DuckDB.
+    - Highlighted the ability to provide hints (primary keys, time columns) when loading from RDBs.
+- **Rationale**: The new SQL adapters provide a much more streamlined and automated way to ingest data into FastDFS, aligning with the goal of simplifying the user experience. Manual schema definition via YAML is still possible but is no longer the primary recommended path for users with existing databases.

@@ -111,43 +111,26 @@ rdb = adapter.load()
 rdb.save("diginetica-rdb/")
 ```
 
-#### Option C: Manual Schema Definition
+#### Option C: Load from Relational Database
 
-Structure your relational data as an RDB with a `metadata.yaml` file:
+FastDFS supports loading data directly from SQL databases (SQLite, MySQL, PostgreSQL, DuckDB).
 
-```yaml
-# metadata.yaml
-name: ecommerce_rdb
-tables:
-- name: user
-  source: data/user.npz
-  columns:
-  - name: user_id
-    dtype: primary_key
-  - name: age  
-    dtype: float
-    
-- name: item
-  source: data/item.npz
-  columns:
-  - name: item_id
-    dtype: primary_key
-  - name: category
-    dtype: category
-    
-- name: interaction
-  source: data/interaction.npz
-  columns:
-  - name: user_id
-    dtype: foreign_key
-    link_to: user.user_id
-  - name: item_id
-    dtype: foreign_key  
-    link_to: item.item_id
-  - name: timestamp
-    dtype: datetime
-  - name: rating
-    dtype: float
+```python
+from fastdfs.adapter.sqlite import SQLiteAdapter
+# from fastdfs.adapter.mysql import MySQLAdapter
+# from fastdfs.adapter.postgres import PostgreSQLAdapter
+
+# Connect to database
+adapter = SQLiteAdapter(
+      "ecommerce.db",
+      time_columns={"orders": "created_at"},  # (Optional) specify which column is the time column for which table
+      type_hints={"users": {"age": "float"}}  # (Optional) specify the desired column data type
+)
+
+# Or for MySQL/PostgreSQL:
+# adapter = MySQLAdapter("mysql+pymysql://user:pass@host/db")
+
+rdb = adapter.load()
 ```
 
 ### 2. Generate Features
@@ -156,8 +139,8 @@ tables:
 import fastdfs
 import pandas as pd
 
-# Load your relational database
-rdb = fastdfs.load_rdb("path/to/your/rdb")
+# Prepare your rdb from the methods above
+rdb = ...
 
 # Create or load your target dataframe
 target_df = pd.DataFrame({
