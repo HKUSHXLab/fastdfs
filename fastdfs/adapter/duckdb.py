@@ -12,7 +12,11 @@ class DuckDBAdapter:
         self,
         database_path: Union[str, Path],
         tables: Optional[List[str]] = None,
-        name: Optional[str] = None
+        name: Optional[str] = None,
+        primary_keys: Optional[Dict[str, str]] = None,
+        foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
+        time_columns: Optional[Dict[str, str]] = None,
+        type_hints: Optional[Dict[str, Dict[str, str]]] = None
     ):
         """
         Initialize the DuckDB adapter.
@@ -21,6 +25,10 @@ class DuckDBAdapter:
             database_path: Path to the DuckDB database file.
             tables: Optional list of table names to load.
             name: Optional name for the RDB. Defaults to the database filename.
+            primary_keys: Optional dictionary mapping table names to primary key column names.
+            foreign_keys: Optional list of foreign key relationships.
+            time_columns: Optional dictionary mapping table names to time column names.
+            type_hints: Optional dictionary mapping table names to column type hints.
         """
         db_path = Path(database_path)
         # DuckDB can create a new file if it doesn't exist, but for an adapter 
@@ -31,6 +39,10 @@ class DuckDBAdapter:
         self.db_path = db_path
         self.tables_to_load = tables
         self.name = name or (db_path.stem if str(database_path) != ":memory:" else "duckdb_memory")
+        self.user_primary_keys = primary_keys or {}
+        self.user_foreign_keys = foreign_keys or []
+        self.user_time_columns = time_columns or {}
+        self.user_type_hints = type_hints or {}
 
     def _get_table_names(self) -> List[str]:
         """Get list of tables to load using native duckdb query."""
@@ -146,6 +158,17 @@ class DuckDBAdapter:
 
         # 2. Discover metadata using native DuckDB queries
         primary_keys, foreign_keys, time_columns, type_hints = self._discover_metadata(table_names)
+
+        # Merge with user-provided hints (user hints take precedence)
+        primary_keys.update(self.user_primary_keys)
+        time_columns.update(self.user_time_columns)
+        foreign_keys.extend(self.user_foreign_keys)
+        
+        for table, hints in self.user_type_hints.items():
+            if table in type_hints:
+                type_hints[table].update(hints)
+            else:
+                type_hints[table] = hints
 
         # Create RDB using the API
         from ..api import create_rdb

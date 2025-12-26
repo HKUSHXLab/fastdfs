@@ -16,7 +16,11 @@ class SQLAdapter:
         self,
         engine: sqlalchemy.engine.Engine,
         tables: Optional[List[str]] = None,
-        name: str = "sql_rdb"
+        name: str = "sql_rdb",
+        primary_keys: Optional[Dict[str, str]] = None,
+        foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
+        time_columns: Optional[Dict[str, str]] = None,
+        type_hints: Optional[Dict[str, Dict[str, str]]] = None
     ):
         """
         Initialize the SQL adapter.
@@ -25,11 +29,19 @@ class SQLAdapter:
             engine: SQLAlchemy engine.
             tables: Optional list of table names to load. If None, all tables will be loaded.
             name: Name of the RDB.
+            primary_keys: Optional dictionary mapping table names to primary key column names.
+            foreign_keys: Optional list of foreign key relationships (child_table, child_col, parent_table, parent_col).
+            time_columns: Optional dictionary mapping table names to time column names.
+            type_hints: Optional dictionary mapping table names to column type hints.
         """
         self.engine = engine
         self.tables_to_load = tables
         self.name = name
         self.inspector = inspect(self.engine)
+        self.user_primary_keys = primary_keys or {}
+        self.user_foreign_keys = foreign_keys or []
+        self.user_time_columns = time_columns or {}
+        self.user_type_hints = type_hints or {}
 
     def _get_table_names(self) -> List[str]:
         """Get list of tables to load."""
@@ -127,6 +139,21 @@ class SQLAdapter:
             tables[table_name] = df
 
         primary_keys, foreign_keys, time_columns, type_hints = self._discover_metadata(table_names)
+
+        # Merge with user-provided hints (user hints take precedence)
+        primary_keys.update(self.user_primary_keys)
+        time_columns.update(self.user_time_columns)
+        
+        # For foreign keys, we append user-provided ones
+        # (In the future we might want to avoid duplicates)
+        foreign_keys.extend(self.user_foreign_keys)
+        
+        # For type hints, merge nested dictionaries
+        for table, hints in self.user_type_hints.items():
+            if table in type_hints:
+                type_hints[table].update(hints)
+            else:
+                type_hints[table] = hints
 
         # Create RDB using the API
         rdb = create_rdb(

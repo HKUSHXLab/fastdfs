@@ -143,21 +143,21 @@ class InferSchemaTransform(RDBTransform):
         return rdb.create_new_with_tables_and_metadata(new_tables, new_table_schemas)
 
     def _infer_dtype(self, df, col_name, table_name, pk_col, time_col, fk_map):
-        # Check hints first
-        if table_name in self.type_hints and col_name in self.type_hints[table_name]:
-            return RDBColumnDType(self.type_hints[table_name][col_name])
-            
-        # Check PK
+        # Check PK first - this is a structural hint that takes precedence
         if col_name == pk_col:
             return RDBColumnDType.primary_key
+            
+        # Check FK next
+        if (table_name, col_name) in fk_map:
+            return RDBColumnDType.foreign_key
+
+        # Check hints for other types
+        if table_name in self.type_hints and col_name in self.type_hints[table_name]:
+            return RDBColumnDType(self.type_hints[table_name][col_name])
             
         # Check Time Col
         if col_name == time_col:
             return RDBColumnDType.datetime_t
-            
-        # Check FK
-        if (table_name, col_name) in fk_map:
-            return RDBColumnDType.foreign_key
             
         # Infer from data
         col_data = df[col_name]

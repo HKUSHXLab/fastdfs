@@ -45,15 +45,15 @@ class FeaturetoolsEngine(DFSEngine):
             cutoff_times = target_df_copy[[target_index, cutoff_time_column]].copy(deep=False)
             cutoff_times.columns = ["instance_id", "time"]
             
-            # We keep the time column in target dataframe to avoid KeyError in some FT versions
-            # target_df_copy = target_df_copy.drop(columns=[cutoff_time_column])
+            # Temporarily drop the time column from target dataframe
+            target_df_copy = target_df_copy.drop(columns=[cutoff_time_column])
         
         # Add target dataframe to EntitySet (without time column if cutoff is used)
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
             dataframe=target_df_copy,
             index=target_index,
-            time_index=cutoff_time_column if cutoff_time_column and not config.use_cutoff_time else None
+            time_index=None  # No time index on target since we handle cutoff separately
         )
         
         # Add relationships from target to RDB entities
