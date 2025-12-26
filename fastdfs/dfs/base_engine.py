@@ -274,7 +274,7 @@ class DFSEngine:
                 if col_schema.dtype == RDBColumnDType.primary_key:
                     index_col = col_name
                     # Don't set semantic tag for index
-                else:
+                elif tag is not None:
                     semantic_tags[col_name] = tag
 
             # Add default index if needed
@@ -432,7 +432,7 @@ def parse_one_column(
     elif col_schema.dtype == RDBColumnDType.datetime_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "Datetime"
-        tag = "string"
+        tag = None
     elif col_schema.dtype == RDBColumnDType.text_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "NaturalLanguage"
@@ -500,7 +500,7 @@ def base_feature_is_key(feature, keys):
             return base_feature_is_key(base, keys)
     
     # Original logic: recursively check base features
-    if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature)):
+    if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature, ft.TransformFeature)):
         if feature.base_features:
             return base_feature_is_key(feature.base_features[0], keys)
     
