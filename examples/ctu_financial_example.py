@@ -42,7 +42,17 @@ def main():
     try:
         # Initialize MySQL adapter
         # This will automatically discover tables, primary keys, and foreign keys
-        adapter = MySQLAdapter(connection_string=connection_string, name="ctu_finance")
+        # We specify 'date' as the time column for tables that have it.
+        time_columns = {
+            "account": "date",
+            "loan": "date",
+            "trans": "date"
+        }
+        adapter = MySQLAdapter(
+            connection_string=connection_string, 
+            name="ctu_financial",
+            time_columns=time_columns
+        )
         rdb = adapter.load()
     except Exception as e:
         print(f"Failed to load dataset: {e}")
