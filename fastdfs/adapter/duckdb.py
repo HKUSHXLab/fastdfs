@@ -121,7 +121,7 @@ class DuckDBAdapter:
         con.close()
         return primary_keys, foreign_keys, time_columns, type_hints
 
-    def load(self) -> 'RDB':
+    def load(self) -> 'RDB': # type: ignore
         """
         Override load to use native duckdb client for faster data retrieval.
         """
