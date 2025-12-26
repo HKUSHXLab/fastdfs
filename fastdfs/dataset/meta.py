@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 __all__ = [
     "RDBColumnDType",
@@ -33,9 +33,7 @@ class RDBColumnSchema(BaseModel):
     Column schema allows extra fields other than the explicitly defined members.
     See `DTYPE_EXTRA_FIELDS` dictionary for more details.
     """
-    class Config:
-        extra = pydantic.Extra.allow
-        use_enum_values = True
+    model_config = ConfigDict(extra='allow', use_enum_values=True)
 
     # Column name.
     name : str
@@ -48,8 +46,7 @@ class RDBTableDataFormat(str, Enum):
 
 class RDBTableSchema(BaseModel):
     """Table schema definition."""
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
     
     name: str
     source: str
@@ -73,8 +70,7 @@ class RDBTableSchema(BaseModel):
 
 class RDBMeta(BaseModel):
     """Relational Database metadata."""
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
     
     name: str  # Name of the RDB
     tables: List[RDBTableSchema]
@@ -94,5 +90,12 @@ class RDBMeta(BaseModel):
                         parent_col     # parent column
                     ))
         return relationships
+
+    def get_table_schema(self, table_name: str) -> RDBTableSchema:
+        """Get the schema for a specific table by name."""
+        for table in self.tables:
+            if table.name == table_name:
+                return table
+        raise ValueError(f"Table {table_name} not found in RDBMeta.")
 
 RDBDatasetMeta = RDBMeta  # Alias for backward compatibility

@@ -36,12 +36,12 @@ dependencies = [
     "numpy",
     "scipy",
     "scikit-learn",
-    "pyarrow",
+    "pyarrow<21.0.0",
     
     # DFS engines
     "featuretools",
-    "duckdb",
     "sqlalchemy",
+    "duckdb",
     "sqlglot>=27.8.0,<28.0.0",
     "sql_formatter",
     
@@ -69,10 +69,17 @@ dev = [
     "mypy>=0.991",
 ]
 
-# Testing with additional data formats
-testing = [
-    "pytest",
-    "pytest-cov",
+
+# Database adapters
+postgres = [
+    "psycopg2-binary",
+]
+mysql = [
+    "pymysql",
+]
+all = [
+    "psycopg2-binary",
+    "pymysql",
 ]
 
 [project.scripts]

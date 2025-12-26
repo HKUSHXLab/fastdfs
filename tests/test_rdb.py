@@ -11,11 +11,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from fastdfs.dataset.rdb import (
-    RDB, 
-    convert_task_dataset_to_rdb,
-    extract_target_tables_from_tasks
-)
+from fastdfs.dataset.rdb import RDB
 from fastdfs.dataset.meta import RDBColumnDType, RDBTableDataFormat
 
 
@@ -25,19 +21,12 @@ class TestRDBDataset:
     @pytest.fixture
     def test_data_path(self):
         """Path to existing test dataset."""
-        return Path(__file__).parent / "data" / "test_rdb"
+        return Path(__file__).parent / "data" / "test_rdb_new"
     
     @pytest.fixture 
     def rdb_dataset(self, test_data_path):
-        """Create RDB dataset from existing test data by converting it first."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            rdb_path = Path(temp_dir) / "rdb"
-            
-            # Convert task-based dataset to RDB-only format
-            convert_task_dataset_to_rdb(test_data_path, rdb_path)
-            
-            # Load the converted RDB dataset
-            yield RDB(rdb_path)
+        """Create RDB dataset from existing test data."""
+        return RDB(test_data_path)
     
     def test_load_rdb_dataset(self, rdb_dataset):
         """Test that RDB dataset loads correctly."""
@@ -155,75 +144,13 @@ class TestRDBDataset:
         assert "timestamp" in [col.name for col in interaction_table.columns]
 
 
-class TestDatasetMigration:
-    """Test suite for migration utilities."""
-    
-    @pytest.fixture
-    def test_data_path(self):
-        """Path to existing test dataset."""
-        return Path(__file__).parent / "data" / "test_rdb"
-    
-    def test_convert_task_dataset_to_rdb(self, test_data_path):
-        """Test converting task-based dataset to RDB format."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            rdb_output_path = Path(temp_dir) / "converted_rdb"
-            
-            # Convert dataset
-            convert_task_dataset_to_rdb(test_data_path, rdb_output_path)
-            
-            # Check that metadata was created
-            metadata_path = rdb_output_path / "metadata.yaml"
-            assert metadata_path.exists()
-            
-            # Check that table data files were copied
-            user_data_path = rdb_output_path / "data" / "user.npz"
-            assert user_data_path.exists()
-            
-            item_data_path = rdb_output_path / "data" / "item.npz"
-            assert item_data_path.exists()
-            
-            interaction_data_path = rdb_output_path / "data" / "interaction.npz"
-            assert interaction_data_path.exists()
-            
-            # Test that converted dataset can be loaded
-            rdb_dataset = RDB(rdb_output_path)
-            assert rdb_dataset.metadata.name == "sbm_user_item"
-            assert len(rdb_dataset.table_names) == 3
-    
-    def test_extract_target_tables_from_tasks(self, test_data_path):
-        """Test extracting task data as target tables."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = Path(temp_dir) / "target_tables"
-            
-            # Extract target tables
-            extract_target_tables_from_tasks(test_data_path, output_dir)
-            
-            # Check that target table files were created
-            train_file = output_dir / "linkpred_train.parquet"
-            assert train_file.exists()
-            
-            validation_file = output_dir / "linkpred_validation.parquet"
-            assert validation_file.exists()
-            
-            test_file = output_dir / "linkpred_test.parquet"
-            assert test_file.exists()
-            
-            # Test that target table can be loaded
-            train_df = pd.read_parquet(train_file)
-            assert "user_id" in train_df.columns
-            assert "item_id" in train_df.columns
-            assert "timestamp" in train_df.columns
-            assert "label" in train_df.columns
-            assert len(train_df) > 0
-
-
 class TestRDBDatasetEdgeCases:
     """Test edge cases and error conditions."""
     
     @pytest.fixture
     def test_data_path(self):
         """Path to existing test dataset."""
-        return Path(__file__).parent / "data" / "test_rdb"
+        return Path(__file__).parent / "data" / "test_rdb_new"
     
     def test_missing_metadata_file(self):
         """Test error when metadata file is missing."""

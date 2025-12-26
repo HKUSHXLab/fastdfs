@@ -4,11 +4,11 @@ import featuretools as ft
 import os
 import pandas as pd
 
-import duckdb
 from ..dataset.meta import RDBCutoffTime
 
 class DuckDBBuilder:
     def __init__(self, path : Path):
+        import duckdb
         self.path = path
         if os.path.exists(self.path):
             os.remove(self.path)

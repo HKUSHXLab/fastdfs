@@ -31,8 +31,6 @@ class DFSConfig(pydantic.BaseModel):
         use_cutoff_time: Whether to use temporal cutoff times
         engine: Name of the DFS engine to use for computation
         engine_path: Optional path for engine-specific configuration
-        trans_primitives: List of transformation primitives to use
-        where_primitives: List of where primitives to use
         max_features: Maximum number of features to generate
         include_entities: List of entities to include in feature generation
         ignore_entities: List of entities to ignore in feature generation
@@ -51,8 +49,6 @@ class DFSConfig(pydantic.BaseModel):
     use_cutoff_time: bool = True
     engine: str = "dfs2sql"
     engine_path: Optional[str] = None
-    trans_primitives: List[str] = []
-    where_primitives: List[str] = []
     max_features: int = -1
     include_entities: Optional[List[str]] = None
     ignore_entities: Optional[List[str]] = None
@@ -233,7 +229,7 @@ class DFSEngine:
             'target_dataframe_name': target_entity_name,
             'max_depth': config.max_depth,
             'agg_primitives': agg_primitives,
-            'trans_primitives': config.trans_primitives,
+            'trans_primitives': [],
             'features_only': True
         }
 

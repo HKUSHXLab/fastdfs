@@ -7,7 +7,7 @@ from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType
 from ..api import create_rdb
 
-from .. import dbinfer_bench as dbb
+from . import dbinfer_bench as dbb
 
 class DBInferAdapter:
     """Adapter for converting DBInfer Benchmark datasets to FastDFS format."""

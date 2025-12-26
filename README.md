@@ -44,41 +44,93 @@ pip install -e .
 
 ### 1. Prepare Your Data
 
-Structure your relational data as an RDB with a `metadata.yaml` file:
+FastDFS provides multiple ways to prepare your relational data.
 
-```yaml
-# metadata.yaml
-name: ecommerce_rdb
-tables:
-- name: user
-  source: data/user.npz
-  columns:
-  - name: user_id
-    dtype: primary_key
-  - name: age  
-    dtype: float
-    
-- name: item
-  source: data/item.npz
-  columns:
-  - name: item_id
-    dtype: primary_key
-  - name: category
-    dtype: category
-    
-- name: interaction
-  source: data/interaction.npz
-  columns:
-  - name: user_id
-    dtype: foreign_key
-    link_to: user.user_id
-  - name: item_id
-    dtype: foreign_key  
-    link_to: item.item_id
-  - name: timestamp
-    dtype: datetime
-  - name: rating
-    dtype: float
+#### Option A: Create from DataFrames (Recommended)
+
+You can create an RDB directly from pandas DataFrames. FastDFS will automatically infer the schema.
+
+```python
+import fastdfs
+import pandas as pd
+
+# 1. Define your tables
+users_df = pd.DataFrame(...)
+items_df = pd.DataFrame(...)
+interactions_df = pd.DataFrame(...)
+
+# 2. Create RDB with relationships
+rdb = fastdfs.create_rdb(
+    name="ecommerce",
+    tables={
+        "user": users_df,
+        "item": items_df,
+        "interaction": interactions_df
+    },
+    primary_keys={
+        "user": "user_id",
+        "item": "item_id"
+    },
+    foreign_keys=[
+        ("interaction", "user_id", "user", "user_id"),
+        ("interaction", "item_id", "item", "item_id")
+    ],
+    time_columns={
+        "interaction": "timestamp"
+    }
+)
+
+# 3. Save for later use
+rdb.save("ecommerce_rdb/")
+
+# 4. Load it back
+rdb = fastdfs.load_rdb("ecommerce_rdb/")
+```
+
+#### Option B: Adapt Existing Datasets
+
+FastDFS includes adapters for popular relational dataset benchmarks.
+
+**RelBench**
+```python
+from fastdfs.adapter.relbench import RelBenchAdapter
+
+# Load and convert RelBench dataset
+adapter = RelBenchAdapter("rel-stack")
+rdb = adapter.load()
+rdb.save("rel-stack-rdb/")
+```
+
+**DBInfer**
+```python
+from fastdfs.adapter.dbinfer import DBInferAdapter
+
+# Load and convert DBInfer dataset
+adapter = DBInferAdapter("diginetica")
+rdb = adapter.load()
+rdb.save("diginetica-rdb/")
+```
+
+#### Option C: Load from Relational Database
+
+FastDFS supports loading data directly from SQL databases (SQLite, MySQL, PostgreSQL, DuckDB).
+
+```python
+from fastdfs.adapter.sqlite import SQLiteAdapter
+# from fastdfs.adapter.mysql import MySQLAdapter
+# from fastdfs.adapter.postgres import PostgreSQLAdapter
+
+# Connect to database
+adapter = SQLiteAdapter(
+      "ecommerce.db",
+      time_columns={"orders": "created_at"},  # (Optional) specify which column is the time column for which table
+      type_hints={"users": {"age": "float"}}  # (Optional) specify the desired column data type
+)
+
+# Or for MySQL/PostgreSQL:
+# adapter = MySQLAdapter("mysql+pymysql://user:pass@host/db")
+
+rdb = adapter.load()
 ```
 
 ### 2. Generate Features
@@ -87,8 +139,8 @@ tables:
 import fastdfs
 import pandas as pd
 
-# Load your relational database
-rdb = fastdfs.load_rdb("path/to/your/rdb")
+# Prepare your rdb from the methods above
+rdb = ...
 
 # Create or load your target dataframe
 target_df = pd.DataFrame({

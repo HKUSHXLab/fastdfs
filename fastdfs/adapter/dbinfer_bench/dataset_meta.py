@@ -17,6 +17,7 @@
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pydantic
+from pydantic import ConfigDict
 
 __all__ = [
     "TIMESTAMP_FEATURE_NAME",
@@ -64,9 +65,7 @@ class DBBColumnSchema(pydantic.BaseModel):
     Column schema allows extra fields other than the explicitly defined members.
     See `DTYPE_EXTRA_FIELDS` dictionary for more details.
     """
-    class Config:
-        extra = pydantic.Extra.allow
-        use_enum_values = True
+    model_config = ConfigDict(extra='allow', use_enum_values=True)
 
     # Column name.
     name : str
@@ -128,9 +127,7 @@ class DBBTaskEvalMetric(str, Enum):
     ndcg = 'ndcg'
 
 class DBBTaskMeta(pydantic.BaseModel):
-    class Config:
-        extra = pydantic.Extra.allow
-        use_enum_values = True
+    model_config = ConfigDict(extra='allow', use_enum_values=True)
 
     name : str
     source : str
