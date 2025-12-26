@@ -229,6 +229,7 @@ class DFSEngine:
             'target_dataframe_name': target_entity_name,
             'max_depth': config.max_depth,
             'agg_primitives': agg_primitives,
+            'trans_primitives': [],
             'features_only': True
         }
 
@@ -269,7 +270,7 @@ class DFSEngine:
                 if col_schema.dtype == RDBColumnDType.primary_key:
                     index_col = col_name
                     # Don't set semantic tag for index
-                elif tag is not None:
+                else:
                     semantic_tags[col_name] = tag
 
             # Add default index if needed
@@ -427,7 +428,7 @@ def parse_one_column(
     elif col_schema.dtype == RDBColumnDType.datetime_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "Datetime"
-        tag = None
+        tag = "string"
     elif col_schema.dtype == RDBColumnDType.text_t:
         series = pd.Series(col_data, copy=False)
         log_ty = "NaturalLanguage"
@@ -495,7 +496,7 @@ def base_feature_is_key(feature, keys):
             return base_feature_is_key(base, keys)
     
     # Original logic: recursively check base features
-    if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature, ft.TransformFeature)):
+    if isinstance(feature, (ft.AggregationFeature, ft.DirectFeature)):
         if feature.base_features:
             return base_feature_is_key(feature.base_features[0], keys)
     

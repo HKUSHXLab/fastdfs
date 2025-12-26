@@ -20,7 +20,7 @@ def test_sqlite_adapter_hints(tmp_path):
     primary_keys = {"users": "id", "orders": "order_id"}
     foreign_keys = [("orders", "user_id", "users", "id")]
     time_columns = {"orders": "created_at"}
-    type_hints = {"users": {"name": "categorical"}}
+    type_hints = {"users": {"name": "category"}}
 
     adapter = SQLiteAdapter(
         db_path,
@@ -33,15 +33,15 @@ def test_sqlite_adapter_hints(tmp_path):
     rdb = adapter.load()
     
     # Verify PKs
-    assert rdb.metadata.tables["users"].primary_key == "id"
-    assert rdb.metadata.tables["orders"].primary_key == "order_id"
+    assert rdb.metadata.get_table_schema("users").primary_key == "id"
+    assert rdb.metadata.get_table_schema("orders").primary_key == "order_id"
     
     # Verify FKs
-    orders_meta = rdb.metadata.tables["orders"]
+    orders_meta = rdb.metadata.get_table_schema("orders")
     fk_found = False
     for col in orders_meta.columns:
         if col.name == "user_id":
-            assert col.foreign_key == "users.id"
+            assert col.link_to == "users.id"
             fk_found = True
     assert fk_found
     
@@ -49,7 +49,7 @@ def test_sqlite_adapter_hints(tmp_path):
     assert orders_meta.time_column == "created_at"
     
     # Verify Type Hint
-    users_meta = rdb.metadata.tables["users"]
+    users_meta = rdb.metadata.get_table_schema("users")
     for col in users_meta.columns:
         if col.name == "name":
-            assert col.type == "categorical"
+            assert col.dtype == "category"

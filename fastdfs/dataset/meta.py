@@ -91,4 +91,11 @@ class RDBMeta(BaseModel):
                     ))
         return relationships
 
+    def get_table_schema(self, table_name: str) -> RDBTableSchema:
+        """Get the schema for a specific table by name."""
+        for table in self.tables:
+            if table.name == table_name:
+                return table
+        raise ValueError(f"Table {table_name} not found in RDBMeta.")
+
 RDBDatasetMeta = RDBMeta  # Alias for backward compatibility
