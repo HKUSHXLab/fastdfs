@@ -88,12 +88,6 @@ def main():
     print(f"Target dataframe shape: {target_df.shape}")
     print(target_df.head())
     
-    # Debug: check if account_id exists in account table
-    account_ids_in_rdb = set(rdb.get_table("account")["account_id"].astype(str))
-    target_account_ids = set(target_df["account_id"])
-    overlap = target_account_ids.intersection(account_ids_in_rdb)
-    print(f"Account IDs overlap: {len(overlap)} / {len(target_account_ids)}")
-
     # 3. Create transform pipeline
     # This prepares the RDB for DFS by handling missing tables, filling primary keys,
     # featurizing datetimes, and ensuring consistent types.
