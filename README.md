@@ -44,6 +44,75 @@ pip install -e .
 
 ### 1. Prepare Your Data
 
+FastDFS provides multiple ways to prepare your relational data.
+
+#### Option A: Create from DataFrames (Recommended)
+
+You can create an RDB directly from pandas DataFrames. FastDFS will automatically infer the schema.
+
+```python
+import fastdfs
+import pandas as pd
+
+# 1. Define your tables
+users_df = pd.DataFrame(...)
+items_df = pd.DataFrame(...)
+interactions_df = pd.DataFrame(...)
+
+# 2. Create RDB with relationships
+rdb = fastdfs.create_rdb(
+    name="ecommerce",
+    tables={
+        "user": users_df,
+        "item": items_df,
+        "interaction": interactions_df
+    },
+    primary_keys={
+        "user": "user_id",
+        "item": "item_id"
+    },
+    foreign_keys=[
+        ("interaction", "user_id", "user", "user_id"),
+        ("interaction", "item_id", "item", "item_id")
+    ],
+    time_columns={
+        "interaction": "timestamp"
+    }
+)
+
+# 3. Save for later use
+rdb.save("ecommerce_rdb/")
+
+# 4. Load it back
+rdb = fastdfs.load_rdb("ecommerce_rdb/")
+```
+
+#### Option B: Adapt Existing Datasets
+
+FastDFS includes adapters for popular relational dataset benchmarks.
+
+**RelBench**
+```python
+from fastdfs.adapter.relbench import RelBenchAdapter
+
+# Load and convert RelBench dataset
+adapter = RelBenchAdapter("rel-stack")
+rdb = adapter.load()
+rdb.save("rel-stack-rdb/")
+```
+
+**DBInfer**
+```python
+from fastdfs.adapter.dbinfer import DBInferAdapter
+
+# Load and convert DBInfer dataset
+adapter = DBInferAdapter("diginetica")
+rdb = adapter.load()
+rdb.save("diginetica-rdb/")
+```
+
+#### Option C: Manual Schema Definition
+
 Structure your relational data as an RDB with a `metadata.yaml` file:
 
 ```yaml
