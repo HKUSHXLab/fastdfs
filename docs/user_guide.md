@@ -43,8 +43,8 @@ Users Table          Items Table         Interactions Table
 +---------+-------+  +----------+-----+  +---------+----------+-----+------+
 | user_id | age   |  | item_id  | cat |  | user_id | item_id  | ts  | rating |
 +---------+-------+  +----------+-----+  +---------+----------+-----+------+
-| 1       | 25    |  | 100      | A   |  | 1       | 100      | ... | 4.5  |
-| 2       | 30    |  | 200      | B   |  | 2       | 200      | ... | 3.0  |
+| u1      | 25    |  | i1       | A   |  | u1      | i1       | ... | 4.5  |
+| u2      | 30    |  | i2       | B   |  | u2      | i2       | ... | 3.0  |
 +---------+-------+  +----------+-----+  +---------+----------+-----+------+
 ```
 
@@ -57,8 +57,8 @@ The target dataframe is what you want to augment with features. It can be:
 
 ```python
 target_df = pd.DataFrame({
-    "user_id": [1, 2, 3],
-    "item_id": [100, 200, 300],
+    "user_id": ["u1", "u2", "u3"],
+    "item_id": ["i1", "i2", "i3"],
     "prediction_time": ["2024-01-01", "2024-01-02", "2024-01-03"]
 })
 ```
@@ -93,76 +93,74 @@ pip install fastdfs
 
 ### Your First Feature Generation
 
-Let's walk through a complete example using e-commerce data:
+Let's walk through a complete example using e-commerce data created from scratch:
 
-#### Step 1: Prepare Your RDB
+#### Step 1: Define Your Data
 
-Create a directory structure:
-```
-ecommerce_rdb/
-├── metadata.yaml
-└── data/
-    ├── users.npz
-    ├── items.npz
-    └── interactions.npz
-```
+First, create your data as pandas DataFrames:
 
-**metadata.yaml**:
-```yaml
-name: ecommerce_rdb
-tables:
-- name: users
-  source: data/users.npz
-  columns:
-  - name: user_id
-    dtype: primary_key
-  - name: age
-    dtype: float
-  - name: registration_date
-    dtype: datetime
-    
-- name: items
-  source: data/items.npz
-  columns:
-  - name: item_id
-    dtype: primary_key
-  - name: category
-    dtype: category
-  - name: price
-    dtype: float
-    
-- name: interactions
-  source: data/interactions.npz
-  columns:
-  - name: user_id
-    dtype: foreign_key
-    link_to: users.user_id
-  - name: item_id
-    dtype: foreign_key
-    link_to: items.item_id
-  - name: timestamp
-    dtype: datetime
-  - name: rating
-    dtype: float
-  - name: purchase_amount
-    dtype: float
-  time_column: timestamp
+```python
+import pandas as pd
+
+# Users table
+users_df = pd.DataFrame({
+    "user_id": ["u1", "u2", "u3"],
+    "age": [25, 30, 35],
+    "registration_date": pd.to_datetime(["2023-01-01", "2023-02-01", "2023-03-01"])
+})
+
+# Items table
+items_df = pd.DataFrame({
+    "item_id": ["i1", "i2", "i3"],
+    "category": ["electronics", "books", "electronics"],
+    "price": [100.0, 20.0, 50.0]
+})
+
+# Interactions table
+interactions_df = pd.DataFrame({
+    "user_id": ["u1", "u1", "u2", "u3"],
+    "item_id": ["i1", "i2", "i2", "i3"],
+    "timestamp": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-02", "2024-01-03"]),
+    "rating": [5, 4, 3, 5]
+})
 ```
 
-#### Step 2: Generate Features
+#### Step 2: Create RDB
+
+Use `create_rdb` to automatically infer the schema and relationships:
 
 ```python
 import fastdfs
-import pandas as pd
 
-# Load the RDB
-rdb = fastdfs.load_rdb("ecommerce_rdb/")
+rdb = fastdfs.create_rdb(
+    name="ecommerce",
+    tables={
+        "users": users_df,
+        "items": items_df,
+        "interactions": interactions_df
+    },
+    primary_keys={
+        "users": "user_id",
+        "items": "item_id"
+    },
+    foreign_keys=[
+        ("interactions", "user_id", "users", "user_id"),
+        ("interactions", "item_id", "items", "item_id")
+    ],
+    time_columns={
+        "interactions": "timestamp"
+    }
+)
+```
 
-# Create target dataframe
+#### Step 3: Generate Features
+
+```python
+# Create target dataframe (what we want to predict on)
 target_df = pd.DataFrame({
-    "user_id": [1, 2, 3],
-    "item_id": [100, 200, 300],
-    "prediction_time": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+    "user_id": ["u1", "u2", "u3"],
+    "item_id": ["i1", "i2", "i3"],
+    "prediction_time": pd.to_datetime(["2024-01-05", "2024-01-05", "2024-01-05"])
 })
 
 # Generate features
@@ -177,26 +175,69 @@ features = fastdfs.compute_dfs_features(
 )
 
 print(f"Generated {len(features.columns)} total features")
-print(f"New features: {len(features.columns) - len(target_df.columns)}")
+# Example features: users.mean(interactions.rating), items.count(interactions)
 ```
 
-## RDB Format
+## Creating an RDB
 
-### Metadata Schema
+FastDFS provides flexible ways to create an `RDB` object, which is the core data structure for feature generation.
 
-The `metadata.yaml` file defines your RDB structure:
+### From DataFrames (Recommended)
 
+The easiest way to start is by creating an RDB from in-memory pandas DataFrames using `create_rdb`.
+
+```python
+rdb = fastdfs.create_rdb(
+    name="my_dataset",
+    tables={"table1": df1, "table2": df2},
+    primary_keys={"table1": "id"},
+    foreign_keys=[("table2", "t1_id", "table1", "id")],
+    time_columns={"table2": "timestamp"}
+)
+```
+
+FastDFS will automatically:
+1. Infer column types (numeric, categorical, datetime, etc.)
+2. Validate relationships
+3. Set up the schema metadata
+
+### From SQL Databases
+
+You can load data directly from SQL databases using adapters:
+
+```python
+from fastdfs.adapter.sqlite import SQLiteAdapter
+
+adapter = SQLiteAdapter("ecommerce.db")
+rdb = adapter.load()
+```
+
+Supported adapters include SQLite, MySQL, PostgreSQL, and DuckDB.
+
+### From Disk (Advanced)
+
+For large datasets or sharing, you can save/load RDBs to disk. The format consists of a `metadata.yaml` file and data files (Parquet or NPZ).
+
+**Saving:**
+```python
+rdb.save("my_dataset_rdb/")
+```
+
+**Loading:**
+```python
+rdb = fastdfs.load_rdb("my_dataset_rdb/")
+```
+
+**metadata.yaml Structure:**
 ```yaml
-name: your_dataset_name  # Required: Name of the dataset
-
-tables:                          # Required: List of tables
-- name: table_name              # Required: Table name
-  source: data/table.npz        # Required: Path to data file (npz or parquet)
-  columns:                      # Required: Column definitions
-  - name: column_name           # Required: Column name
-    dtype: column_type          # Required: Data type (see below)
-    link_to: target_table.column # Optional: For foreign keys
-  time_column: timestamp_col    # Optional: Primary time column for the table
+name: dataset_name
+tables:
+- name: users
+  source: data/users.parquet
+  columns:
+  - name: user_id
+    dtype: primary_key
+  ...
 ```
 
 ### Supported Data Types
@@ -222,7 +263,7 @@ import numpy as np
 import pandas as pd
 
 # Save dataframe as npz
-df = pd.DataFrame({"user_id": [1, 2, 3], "age": [25, 30, 35]})
+df = pd.DataFrame({"user_id": ["u1", "u2", "u3"], "age": [25, 30, 35]})
 arrays_dict = {col: df[col].values for col in df.columns}
 np.savez("users.npz", **arrays_dict)
 ```
@@ -234,12 +275,17 @@ df.to_parquet("users.parquet", index=False)
 
 ## Basic Usage
 
-### Loading an RDB
+### Creating or Loading an RDB
+
+You can create an RDB from DataFrames or load it from disk/database.
 
 ```python
 import fastdfs
 
-# Load from directory with metadata.yaml
+# Option 1: From DataFrames
+rdb = fastdfs.create_rdb(...)
+
+# Option 2: From Disk
 rdb = fastdfs.load_rdb("path/to/rdb/")
 
 # Inspect the RDB
@@ -285,8 +331,8 @@ test_features = fastdfs.compute_dfs_features(rdb, test_df, key_mappings)
 
 # New prediction instances
 new_data = pd.DataFrame({
-    "user_id": [999],
-    "item_id": [888], 
+    "user_id": ["u999"],
+    "item_id": ["i888"], 
     "prediction_time": ["2024-12-01"]
 })
 new_features = fastdfs.compute_dfs_features(rdb, new_data, key_mappings)
@@ -375,7 +421,7 @@ pipeline = fastdfs.DFSPipeline(
     dfs_config=fastdfs.DFSConfig(max_depth=2, engine="dfs2sql")
 )
 
-features = pipeline.run(
+features = pipeline.compute_features(
     rdb=rdb,
     target_dataframe=target_df,
     key_mappings=key_mappings,

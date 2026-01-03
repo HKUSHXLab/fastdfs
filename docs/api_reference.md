@@ -11,7 +11,45 @@
 
 ## Core API Functions
 
-### `load_rdb(path: str) -> RDBDataset`
+### `create_rdb(...) -> RDB`
+
+Create an RDB from in-memory pandas DataFrames.
+
+```python
+def create_rdb(
+    tables: Dict[str, pd.DataFrame],
+    name: str = "myrdb",
+    primary_keys: Optional[Dict[str, str]] = None,
+    foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
+    time_columns: Optional[Dict[str, str]] = None,
+    type_hints: Optional[Dict[str, Dict[str, str]]] = None
+) -> RDB
+```
+
+**Parameters:**
+- `tables` (Dict[str, pd.DataFrame]): Dictionary mapping table names to DataFrames
+- `name` (str): Name of the dataset (default: "myrdb")
+- `primary_keys` (Dict[str, str]): Dictionary mapping table names to primary key column names
+- `foreign_keys` (List[Tuple]): List of relationships as `(child_table, child_col, parent_table, parent_col)`
+- `time_columns` (Dict[str, str]): Dictionary mapping table names to time column names
+- `type_hints` (Dict[str, Dict[str, str]]): Dictionary mapping table names to column type overrides
+
+**Returns:**
+- `RDB`: The created relational database object
+
+**Example:**
+```python
+rdb = fastdfs.create_rdb(
+    tables={"users": users_df, "items": items_df},
+    name="ecommerce",
+    primary_keys={"users": "user_id"},
+    # ...
+)
+```
+
+---
+
+### `load_rdb(path: str) -> RDB`
 
 Load a relational database dataset from a directory.
 
@@ -19,7 +57,7 @@ Load a relational database dataset from a directory.
 - `path` (str): Path to the directory containing `metadata.yaml` and data files
 
 **Returns:**
-- `RDBDataset`: The loaded relational database dataset
+- `RDB`: The loaded relational database dataset
 
 **Example:**
 ```python
@@ -42,7 +80,7 @@ Compute Deep Feature Synthesis features for a target dataframe using RDB context
 
 ```python
 def compute_dfs_features(
-    rdb: RDBDataset,
+    rdb: RDB,
     target_dataframe: pd.DataFrame,
     key_mappings: Dict[str, str],
     cutoff_time_column: Optional[str] = None,
@@ -52,7 +90,7 @@ def compute_dfs_features(
 ```
 
 **Parameters:**
-- `rdb` (RDBDataset): The relational database providing context for feature generation
+- `rdb` (RDB): The relational database providing context for feature generation
 - `target_dataframe` (pd.DataFrame): DataFrame to augment with features
 - `key_mappings` (Dict[str, str]): Map target columns to RDB primary keys
   - Format: `{"target_col": "table.primary_key_col"}`
@@ -97,9 +135,9 @@ class DFSPipeline:
         dfs_config: Optional[DFSConfig] = None
     )
     
-    def run(
+    def compute_features(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,
@@ -123,7 +161,7 @@ pipeline = fastdfs.DFSPipeline(
     dfs_config=fastdfs.DFSConfig(max_depth=2, engine="featuretools")
 )
 
-features = pipeline.run(
+features = pipeline.compute_features(
     rdb=rdb,
     target_dataframe=target_df,
     key_mappings=key_mappings,
@@ -139,11 +177,14 @@ Configuration for Deep Feature Synthesis parameters.
 
 ```python
 class DFSConfig(pydantic.BaseModel):
-    agg_primitives: List[str] = ["max", "min", "mean", "count", "mode", "std"]
+    agg_primitives: List[str] = ["max", "min", "mean", "std", "count", "mode"]
     max_depth: int = 2
     use_cutoff_time: bool = True
     engine: str = "dfs2sql"
     engine_path: Optional[str] = None
+    max_features: int = -1
+    chunk_size: Optional[int] = None
+    n_jobs: int = 1
 ```
 
 **Attributes:**
@@ -152,6 +193,9 @@ class DFSConfig(pydantic.BaseModel):
 - `use_cutoff_time` (bool): Whether to respect temporal cutoff times
 - `engine` (str): DFS engine to use ("featuretools" or "dfs2sql")
 - `engine_path` (Optional[str]): Path for engine-specific configuration (e.g., DuckDB file)
+- `max_features` (int): Maximum number of features to generate (-1 for unlimited)
+- `chunk_size` (Optional[int]): Chunk size for batch processing
+- `n_jobs` (int): Number of parallel jobs for computation
 
 **Available Aggregation Primitives:**
 
@@ -188,13 +232,18 @@ config = fastdfs.DFSConfig(
 
 ## Dataset Classes
 
-### `RDBDataset`
+### `RDB`
 
 Represents a relational database for feature engineering.
 
 ```python
-class RDBDataset:
-    def __init__(self, path: Path)
+class RDB:
+    def __init__(
+        self, 
+        path: Optional[Path] = None, 
+        metadata: Optional[RDBMeta] = None, 
+        tables: Optional[Dict[str, pd.DataFrame]] = None
+    )
     
     @property
     def table_names(self) -> List[str]
@@ -205,7 +254,7 @@ class RDBDataset:
     
     def get_relationships(self) -> List[Tuple[str, str, str, str]]
     
-    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDBDataset'
+    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB'
 ```
 
 **Properties:**
@@ -267,6 +316,7 @@ class RDBTableSchema:
     name: str
     columns: List[RDBColumnSchema]
     source: str
+    format: str
     time_column: Optional[str] = None
 ```
 
@@ -299,7 +349,7 @@ Base class for RDB transformations.
 
 ```python
 class RDBTransform:
-    def __call__(self, rdb: RDBDataset) -> RDBDataset
+    def __call__(self, rdb: RDB) -> RDB
 ```
 
 All transforms are pure functions that take an RDB and return a new RDB.
@@ -312,7 +362,7 @@ Pipeline for composing multiple RDB transforms.
 class RDBTransformPipeline:
     def __init__(self, transforms: List[RDBTransform])
     
-    def __call__(self, rdb: RDBDataset) -> RDBDataset
+    def __call__(self, rdb: RDB) -> RDB
 ```
 
 **Example:**
@@ -334,7 +384,7 @@ Transform that removes or processes dummy/placeholder tables.
 
 ```python
 class HandleDummyTable(RDBTransform):
-    def __call__(self, rdb: RDBDataset) -> RDBDataset
+    def __call__(self, rdb: RDB) -> RDB
 ```
 
 **Purpose:** Remove tables that are placeholders or contain no useful information.
@@ -356,6 +406,31 @@ datetime_transform = RDBTransformWrapper(
 )
 rdb_with_time_features = datetime_transform(rdb)
 ```
+
+### `InferSchemaTransform`
+
+Transform that infers RDBColumnDType from table data types.
+
+```python
+class InferSchemaTransform(RDBTransform):
+    def __init__(
+        self,
+        primary_keys: Optional[Dict[str, str]] = None,
+        foreign_keys: Optional[List[Tuple[str, str, str, str]]] = None,
+        time_columns: Optional[Dict[str, str]] = None,
+        type_hints: Optional[Dict[str, Dict[str, str]]] = None,
+        category_threshold: int = 10
+    )
+```
+
+**Parameters:**
+- `primary_keys` (Dict[str, str]): Dictionary mapping table names to primary key column names
+- `foreign_keys` (List[Tuple]): List of relationships as `(child_table, child_col, parent_table, parent_col)`
+- `time_columns` (Dict[str, str]): Dictionary mapping table names to time column names
+- `type_hints` (Dict[str, Dict[str, str]]): Dictionary mapping table names to column type overrides
+- `category_threshold` (int): Threshold for unique values to consider a column as category (default: 10)
+
+**Purpose:** Fills in missing `dtype` in `RDBColumnSchema` based on pandas dtypes and provided hints.
 
 ### `CanonicalizeTypes`
 
@@ -383,8 +458,8 @@ clean_rdb = transform(rdb)
 Transform that fills missing values in primary key columns.
 
 ```python
-class FillMissingPrimaryKey(TableTransform):
-    def __call__(self, table: pd.DataFrame, table_metadata: RDBTableSchema) -> Tuple[pd.DataFrame, RDBTableSchema]
+class FillMissingPrimaryKey(RDBTransform):
+    def __call__(self, rdb: RDB) -> RDB
 ```
 
 **Purpose:** Ensures primary key integrity by filling missing values (NaNs) with a generated unique identifier or a placeholder.
@@ -395,11 +470,12 @@ Transform that extracts datetime components from datetime columns.
 
 ```python
 class FeaturizeDatetime(ColumnTransform):
-    def __init__(self, features: List[str] = ["year", "month", "day"])
+    def __init__(self, features: List[str] = ["year", "month", "day", "hour"], retain_original: bool = True)
 ```
 
 **Parameters:**
 - `features` (List[str]): List of datetime components to extract
+- `retain_original` (bool): Whether to keep the original datetime column (default: True)
 
 **Available Features:**
 - `year`: Year (e.g., 2024)
@@ -424,21 +500,17 @@ transform = RDBTransformWrapper(
 Transform that removes columns based on various criteria.
 
 ```python
-class FilterColumn(ColumnTransform):
+class FilterColumn(TableTransform):
     def __init__(
         self,
-        drop_redundant: bool = False,
-        min_unique_values: int = 1,
-        max_unique_ratio: float = 1.0,
-        drop_dtypes: Optional[List[str]] = None
+        drop_dtypes: Optional[List[str]] = None,
+        drop_redundant: bool = False
     )
 ```
 
 **Parameters:**
-- `drop_redundant` (bool): Remove columns with all identical values
-- `min_unique_values` (int): Minimum number of unique values required
-- `max_unique_ratio` (float): Maximum ratio of unique values to total rows
 - `drop_dtypes` (List[str]): List of data types to remove
+- `drop_redundant` (bool): Remove columns with all identical values
 
 **Example:**
 ```python
@@ -464,7 +536,7 @@ class DFSEngine:
     
     def compute_features(
         self,
-        rdb: RDBDataset,
+        rdb: RDB,
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,
