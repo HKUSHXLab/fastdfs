@@ -96,7 +96,7 @@ where = ["."]
 include = ["fastdfs*"]
 
 [tool.setuptools.package-data]
-fastdfs = ["configs/**/*.yaml"]
+fastdfs = ["adapter/dbinfer_bench/*.yaml"]
 
 [tool.black]
 line-length = 88
