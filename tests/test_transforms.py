@@ -5,6 +5,9 @@ This tests the RDBTransform, TableTransform, and ColumnTransform base classes
 along with the specific transform implementations using real test data.
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import pandas as pd
 import pytest
 import numpy as np

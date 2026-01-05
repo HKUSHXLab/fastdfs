@@ -7,6 +7,9 @@ This example shows how to:
 3. Apply DFS feature generation to a target dataframe
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import sys
 from pathlib import Path
 import pandas as pd

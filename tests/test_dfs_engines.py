@@ -5,6 +5,9 @@ This test file validates that the new DFS engines correctly compute features
 for external target dataframes using the simplified RDB dataset interface.
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import pytest
 import pandas as pd
 import numpy as np

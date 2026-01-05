@@ -1,3 +1,6 @@
+
+from loguru import logger
+logger.enable("fastdfs")
 import pytest
 import sqlite3
 import pandas as pd

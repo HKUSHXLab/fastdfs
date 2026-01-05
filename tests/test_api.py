@@ -2,6 +2,9 @@
 Tests for Phase 4 API - New table-centric DFS interface.
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import pytest
 import pandas as pd
 from pathlib import Path

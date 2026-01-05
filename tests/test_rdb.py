@@ -5,6 +5,9 @@ This test file validates that the new RDBDataset class correctly loads
 and provides access to relational database tables without tasks.
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import pytest
 import pandas as pd
 import tempfile

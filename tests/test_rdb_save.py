@@ -1,3 +1,6 @@
+
+from loguru import logger
+logger.enable("fastdfs")
 import unittest
 import pandas as pd
 import shutil

@@ -3,6 +3,9 @@ Example of loading the CTU "Finance" dataset from MySQL and running DFS.
 Dataset source: https://relational.fel.cvut.cz/dataset/Financial
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import sys
 from pathlib import Path
 import pandas as pd

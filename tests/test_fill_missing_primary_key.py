@@ -9,6 +9,9 @@ Tests cover:
 5. Referential integrity verification
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import pytest
 import pandas as pd
 import numpy as np

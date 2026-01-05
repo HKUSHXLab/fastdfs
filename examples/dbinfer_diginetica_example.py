@@ -2,6 +2,9 @@
 Example of loading DBInfer Diginetica dataset and running DFS on the ctr task.
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import sys
 from pathlib import Path
 import pandas as pd

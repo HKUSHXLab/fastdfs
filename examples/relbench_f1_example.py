@@ -2,6 +2,9 @@
 Example of loading RelBench F1 dataset and running DFS on the driver-dnf task.
 """
 
+from loguru import logger
+logger.enable("fastdfs")
+
 import sys
 from pathlib import Path
 import pandas as pd

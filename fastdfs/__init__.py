@@ -7,6 +7,9 @@ A standalone package for deep feature synthesis using a table-centric approach.
 
 __version__ = "0.2.0"
 
+from loguru import logger
+logger.disable("fastdfs")
+
 # Main Table-Centric API
 from .api import (
     load_rdb,
