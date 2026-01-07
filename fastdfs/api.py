@@ -8,6 +8,7 @@ the RDB interface.
 from typing import Dict, Optional, Any, List, Tuple
 import pandas as pd
 from pathlib import Path
+from loguru import logger
 
 from .dfs import DFSConfig, get_dfs_engine
 from .dataset.rdb import RDB
@@ -151,23 +152,41 @@ def compute_dfs_features(
             raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
 
         if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
-            # Check if target column is string type
-            is_string = pd.api.types.is_string_dtype(target_dataframe[target_col]) or \
-                        pd.api.types.is_object_dtype(target_dataframe[target_col])
+            # Get the actual RDB table DataFrame to check its dtype after transforms
+            rdb_table = rdb.get_table(table_name)
+            rdb_col_dtype = rdb_table[col_name].dtype
+            target_col_dtype = target_dataframe[target_col].dtype
             
-            if not is_string:
-                # Check if values are actually strings if it's object type
-                # (pandas often uses object for strings)
-                # But if it's int64, it's definitely not string.
-                
-                # A stricter check:
-                # If the RDB column is a key, we expect the target column to be string.
-                # We can try to be helpful and suggest casting.
-                raise TypeError(
-                    f"Column '{target_col}' in target dataframe must be of string type to match "
-                    f"RDB key '{rdb_key}'. Current type: {target_dataframe[target_col].dtype}. "
-                    f"Please cast it to string: target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
-                )
+            # Convert target column to match RDB column dtype if they differ
+            if rdb_col_dtype != target_col_dtype:
+                try:
+                    # Convert target column to match RDB column type
+                    if pd.api.types.is_string_dtype(rdb_col_dtype) or pd.api.types.is_object_dtype(rdb_col_dtype):
+                        # RDB column is string, convert target to string
+                        target_dataframe[target_col] = target_dataframe[target_col].astype(str)
+                    elif pd.api.types.is_integer_dtype(rdb_col_dtype):
+                        # RDB column is integer, try to convert target to integer
+                        target_dataframe[target_col] = pd.to_numeric(target_dataframe[target_col], errors='coerce').astype(rdb_col_dtype)
+                    elif pd.api.types.is_float_dtype(rdb_col_dtype):
+                        # RDB column is float, convert target to float
+                        target_dataframe[target_col] = pd.to_numeric(target_dataframe[target_col], errors='coerce').astype(rdb_col_dtype)
+                    else:
+                        # For other types, try direct conversion
+                        target_dataframe[target_col] = target_dataframe[target_col].astype(rdb_col_dtype)
+                    
+                    # Log the conversion for transparency
+                    logger.debug(
+                        f"Converted target column '{target_col}' from {target_col_dtype} to {rdb_col_dtype} "
+                        f"to match RDB key '{rdb_key}'"
+                    )
+                except (ValueError, TypeError) as e:
+                    # If conversion fails, raise a helpful error
+                    raise TypeError(
+                        f"Failed to convert column '{target_col}' from {target_col_dtype} to {rdb_col_dtype} "
+                        f"to match RDB key '{rdb_key}'. Original error: {e}. "
+                        f"Please ensure the values are compatible or manually convert: "
+                        f"target_df['{target_col}'] = target_df['{target_col}'].astype({rdb_col_dtype})"
+                    )
 
     # Get the appropriate engine
     engine = get_dfs_engine(config.engine, config)
