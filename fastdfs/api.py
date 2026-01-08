@@ -157,35 +157,30 @@ def compute_dfs_features(
             rdb_col_dtype = rdb_table[col_name].dtype
             target_col_dtype = target_dataframe[target_col].dtype
             
-            # Convert target column to match RDB column dtype if they differ
+            # Check that RDB column dtype is string
+            if not (pd.api.types.is_string_dtype(rdb_col_dtype) or pd.api.types.is_object_dtype(rdb_col_dtype)):
+                raise TypeError(
+                    f"RDB column '{rdb_key}' has dtype {rdb_col_dtype}, but expected string type. "
+                    f"Please ensure the RDB column is stored as string."
+                )
+            
+            # Convert target column to string to match RDB column dtype
             if rdb_col_dtype != target_col_dtype:
                 try:
-                    # Convert target column to match RDB column type
-                    if pd.api.types.is_string_dtype(rdb_col_dtype) or pd.api.types.is_object_dtype(rdb_col_dtype):
-                        # RDB column is string, convert target to string
-                        target_dataframe[target_col] = target_dataframe[target_col].astype(str)
-                    elif pd.api.types.is_integer_dtype(rdb_col_dtype):
-                        # RDB column is integer, try to convert target to integer
-                        target_dataframe[target_col] = pd.to_numeric(target_dataframe[target_col], errors='coerce').astype(rdb_col_dtype)
-                    elif pd.api.types.is_float_dtype(rdb_col_dtype):
-                        # RDB column is float, convert target to float
-                        target_dataframe[target_col] = pd.to_numeric(target_dataframe[target_col], errors='coerce').astype(rdb_col_dtype)
-                    else:
-                        # For other types, try direct conversion
-                        target_dataframe[target_col] = target_dataframe[target_col].astype(rdb_col_dtype)
+                    target_dataframe[target_col] = target_dataframe[target_col].astype(str)
                     
                     # Log the conversion for transparency
                     logger.debug(
-                        f"Converted target column '{target_col}' from {target_col_dtype} to {rdb_col_dtype} "
+                        f"Converted target column '{target_col}' from {target_col_dtype} to string "
                         f"to match RDB key '{rdb_key}'"
                     )
                 except (ValueError, TypeError) as e:
                     # If conversion fails, raise a helpful error
                     raise TypeError(
-                        f"Failed to convert column '{target_col}' from {target_col_dtype} to {rdb_col_dtype} "
+                        f"Failed to convert column '{target_col}' from {target_col_dtype} to string "
                         f"to match RDB key '{rdb_key}'. Original error: {e}. "
                         f"Please ensure the values are compatible or manually convert: "
-                        f"target_df['{target_col}'] = target_df['{target_col}'].astype({rdb_col_dtype})"
+                        f"target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
                     )
 
     # Get the appropriate engine
