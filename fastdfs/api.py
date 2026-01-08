@@ -157,11 +157,13 @@ def compute_dfs_features(
             rdb_col_dtype = rdb_table[col_name].dtype
             target_col_dtype = target_dataframe[target_col].dtype
             
-            # Check that RDB column dtype is string
-            if not (pd.api.types.is_string_dtype(rdb_col_dtype) or pd.api.types.is_object_dtype(rdb_col_dtype)):
+            # Check that RDB column dtype is string or categorical (which can be converted to string)
+            if not (pd.api.types.is_string_dtype(rdb_col_dtype) or 
+                    pd.api.types.is_object_dtype(rdb_col_dtype) or 
+                    pd.api.types.is_categorical_dtype(rdb_col_dtype)):
                 raise TypeError(
-                    f"RDB column '{rdb_key}' has dtype {rdb_col_dtype}, but expected string type. "
-                    f"Please ensure the RDB column is stored as string."
+                    f"RDB column '{rdb_key}' has dtype {rdb_col_dtype}, but expected string or categorical type. "
+                    f"Please ensure the RDB column is stored as string or categorical."
                 )
             
             # Convert target column to string to match RDB column dtype
