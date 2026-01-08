@@ -152,22 +152,11 @@ def compute_dfs_features(
             raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
 
         if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
-            # Get the actual RDB table DataFrame to check its dtype after transforms
-            rdb_table = rdb.get_table(table_name)
-            rdb_col_dtype = rdb_table[col_name].dtype
+            # Convert target column to string to match RDB key columns (which should always be string)
             target_col_dtype = target_dataframe[target_col].dtype
             
-            # Check that RDB column dtype is string or categorical (which can be converted to string)
-            if not (pd.api.types.is_string_dtype(rdb_col_dtype) or 
-                    pd.api.types.is_object_dtype(rdb_col_dtype) or 
-                    pd.api.types.is_categorical_dtype(rdb_col_dtype)):
-                raise TypeError(
-                    f"RDB column '{rdb_key}' has dtype {rdb_col_dtype}, but expected string or categorical type. "
-                    f"Please ensure the RDB column is stored as string or categorical."
-                )
-            
-            # Convert target column to string to match RDB column dtype
-            if rdb_col_dtype != target_col_dtype:
+            # Convert to string if not already string (categorical is converted for consistency)
+            if not pd.api.types.is_string_dtype(target_col_dtype):
                 try:
                     target_dataframe[target_col] = target_dataframe[target_col].astype(str)
                     
