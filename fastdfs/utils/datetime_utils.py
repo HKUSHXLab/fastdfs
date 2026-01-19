@@ -48,9 +48,10 @@ def featurize_datetime_column(column: pd.Series, features: List[str]) -> pd.Data
                  ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek']
     
     Returns:
-        DataFrame with extracted datetime features
+        DataFrame with extracted datetime features, preserving the original column's index
     """
-    result_df = pd.DataFrame()
+    # Preserve the original index to avoid alignment issues
+    result_df = pd.DataFrame(index=column.index)
     base_name = column.name or 'datetime'
     
     # Map feature names to extraction functions
