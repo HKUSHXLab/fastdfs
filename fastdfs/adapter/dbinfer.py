@@ -46,11 +46,25 @@ class DBInferAdapter:
         # dataset.metadata.tables is a list of table metadata objects
         for table_meta in self.dataset.metadata.tables:
             table_name = table_meta.name
-            
+
+            # Get metadata column names for filtering
+            metadata_columns = [col.name for col in table_meta.columns]
+
             # Convert numpy dict to DataFrame
             if table_name in self.dataset.tables:
-                # dataset.tables[table_name] is a dict of numpy arrays
-                df = pd.DataFrame(self.dataset.tables[table_name])
+                # dataset.tables[table_name] is a dict of numpy arrays with ALL columns
+                # Filter to only include columns specified in metadata
+                table_data = self.dataset.tables[table_name]
+                filtered_data = {col_name: table_data[col_name]
+                                 for col_name in metadata_columns
+                                 if col_name in table_data}
+
+                # Check if any metadata columns are missing
+                missing_cols = set(metadata_columns) - set(filtered_data.keys())
+                if missing_cols:
+                    logger.warning(f"Table {table_name}: columns {missing_cols} in metadata but not in data")
+
+                df = pd.DataFrame(filtered_data)
                 tables[table_name] = df
             else:
                 logger.warning(f"Table {table_name} found in metadata but not in data.")
