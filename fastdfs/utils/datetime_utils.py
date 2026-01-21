@@ -45,7 +45,7 @@ def featurize_datetime_column(column: pd.Series, features: List[str]) -> pd.Data
     Args:
         column: Pandas Series with datetime values
         features: List of features to extract. Options:
-                 ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'timestamp']
+                 ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'epochtime']
 
     Returns:
         DataFrame with extracted datetime features, preserving the original column's index
@@ -63,7 +63,7 @@ def featurize_datetime_column(column: pd.Series, features: List[str]) -> pd.Data
         'minute': dt2minute,
         'second': dt2second,
         'dayofweek': dt2dayofweek,
-        'timestamp': dt2ts  # Nanoseconds since epoch (1970-01-01)
+        'epochtime': dt2ts
     }
     
     # Extract requested features

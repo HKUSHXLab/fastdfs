@@ -22,8 +22,7 @@ class FeaturizeDatetime(ColumnTransform):
 
         Args:
             features: List of features to extract.
-                     Options: ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'timestamp']
-                     - 'timestamp' extracts epoch time in nanoseconds (numeric representation)
+                     Options: ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'epochtime']
                      Default extracts: ['year', 'month', 'day', 'hour']
             retain_original: Whether to keep the original datetime column. Default is True.
         """
