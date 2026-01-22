@@ -32,7 +32,7 @@ requires-python = ">=3.10"
 # Core dependencies (minimal set focused on DFS)
 dependencies = [
     # Data processing
-    "pandas>=2.3.3,<3.0",
+    "pandas>=2.3.3,<3.0",  # pandas>=3.0 will raise issue related to woodwork
     "numpy",
     "scipy",
     "scikit-learn",
