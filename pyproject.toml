@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastdfs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fast Deep Feature Synthesis for tabular data"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -32,7 +32,7 @@ requires-python = ">=3.10"
 # Core dependencies (minimal set focused on DFS)
 dependencies = [
     # Data processing
-    "pandas",
+    "pandas>=2.3.3,<3.0",
     "numpy",
     "scipy",
     "scikit-learn",
