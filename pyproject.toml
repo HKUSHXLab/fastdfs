@@ -48,7 +48,6 @@ dependencies = [
     # Configuration and CLI
     "pydantic",
     "pyyaml",
-    "typer",
     "tqdm",
     
     # Utilities
