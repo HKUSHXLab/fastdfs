@@ -12,6 +12,7 @@ import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
 
 from ..utils import yaml_utils
+from ..utils.type_inference import infer_semantic_type
 from .loader import get_table_data_loader
 from .meta import (
     RDBMeta,
@@ -25,11 +26,11 @@ __all__ = ['RDB', 'RDBDataset']
 
 class RDB:
     """Relational Database (RDB) - focuses on relational tables only."""
-    
+
     def __init__(
-        self, 
-        path: Optional[Path] = None, 
-        metadata: Optional[RDBMeta] = None, 
+        self,
+        path: Optional[Path] = None,
+        metadata: Optional[RDBMeta] = None,
         tables: Optional[Dict[str, pd.DataFrame]] = None
     ):
         if path:
@@ -42,16 +43,16 @@ class RDB:
             self.tables = tables
         else:
             raise ValueError("Either path or (metadata and tables) must be provided.")
-    
+
     def _load_metadata(self) -> RDBMeta:
         """Load metadata from YAML file."""
         metadata_path = self.path / 'metadata.yaml'
         if not metadata_path.exists():
             raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
-        
+
         # Load raw metadata and convert to simplified format
         raw_data = yaml_utils.load_yaml(metadata_path)
-        
+
         # Convert tables
         tables = []
         for table_data in raw_data.get('tables', []):
@@ -60,18 +61,18 @@ class RDB:
                 source=table_data['source'],
                 format=RDBTableDataFormat(table_data['format']),
                 columns=[
-                    RDBColumnSchema(**col_data) 
+                    RDBColumnSchema(**col_data)
                     for col_data in table_data['columns']
                 ],
                 time_column=table_data.get('time_column')
             )
             tables.append(table_schema)
-        
+
         return RDBMeta(
             name=raw_data['name'],
             tables=tables
         )
-    
+
     def _load_tables(self) -> Dict[str, pd.DataFrame]:
         """Load all tables as pandas DataFrames."""
         tables = {}
@@ -79,11 +80,11 @@ class RDB:
             table_path = self.path / table_schema.source
             if not table_path.exists():
                 raise FileNotFoundError(f"Table data file not found: {table_path}")
-            
+
             # Load raw data using existing loader
             loader = get_table_data_loader(table_schema.format)
             table_data = loader(table_path)
-            
+
             # Convert to pandas DataFrame
             df_data = {}
             for col_schema in table_schema.columns:
@@ -91,19 +92,19 @@ class RDB:
                     raise ValueError(
                         f"Column {col_schema.name} not found in table {table_schema.name}"
                     )
-                
+
                 col_data = table_data[col_schema.name]
-                
+
                 # Explicitly cast data based on schema type to ensure consistency
                 if col_schema.dtype == RDBColumnDType.float_t:
                     col_data = pd.to_numeric(col_data, errors='coerce')
                 elif col_schema.dtype == RDBColumnDType.datetime_t:
                     col_data = pd.to_datetime(col_data, errors='coerce')
-                
+
                 df_data[col_schema.name] = col_data
-            
+
             tables[table_schema.name] = pd.DataFrame(df_data)
-        
+
         return tables
 
     @property
@@ -131,7 +132,7 @@ class RDB:
     def get_relationships(self) -> List[Tuple[str, str, str, str]]:
         """
         Get all foreign key relationships.
-        
+
         Returns:
             List of (child_table, child_col, parent_table, parent_col) tuples.
         """
@@ -140,19 +141,19 @@ class RDB:
     def save(self, path: Union[str, Path]):
         """
         Save the RDB to a directory.
-        
+
         Args:
             path: Directory path to save the RDB.
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        
+
         # Save tables
         for table_name, df in self.tables.items():
             # We assume parquet format for now as it is the default
             output_path = path / f"{table_name}.parquet"
             df.to_parquet(output_path)
-            
+
         # Save metadata
         yaml_utils.save_yaml(self.metadata.model_dump(mode='json'), path / "metadata.yaml")
 
@@ -161,8 +162,8 @@ class RDB:
         return self.create_new_with_tables_and_metadata(new_tables, {})
 
     def create_new_with_tables_and_metadata(
-        self, 
-        new_tables: Dict[str, pd.DataFrame], 
+        self,
+        new_tables: Dict[str, pd.DataFrame],
         new_metadata: Dict[str, RDBTableSchema]
     ) -> 'RDB':
         """Create new RDB with updated tables and metadata (for transforms that modify schemas)."""
@@ -170,7 +171,7 @@ class RDB:
         new_dataset = RDB.__new__(RDB)
         new_dataset.path = self.path
         new_dataset.tables = new_tables.copy()
-        
+
         # Update metadata with new table schemas
         updated_table_schemas = []
         for table_schema in self.metadata.tables:
@@ -178,26 +179,104 @@ class RDB:
                 updated_table_schemas.append(new_metadata[table_schema.name])
             else:
                 updated_table_schemas.append(table_schema)
-        
+
         # Add any completely new table schemas
         existing_table_names = {schema.name for schema in self.metadata.tables}
         for table_name, schema in new_metadata.items():
             if table_name not in existing_table_names:
                 updated_table_schemas.append(schema)
-        
+
         # Create new metadata object
         new_dataset.metadata = RDBMeta(
             name=self.metadata.name,
             tables=updated_table_schemas
         )
-        
+
         return new_dataset
-        
+
+    def add_table(
+        self,
+        dataframe: pd.DataFrame,
+        name: str,
+        time_column: Optional[str] = None,
+        primary_key: Optional[str] = None,
+        foreign_keys: Optional[List[Tuple[str, str, str]]] = None,
+        column_types: Optional[Dict[str, str]] = None
+    ) -> 'RDB':
+        """
+        Add a new table to the RDB.
+
+        Args:
+            dataframe: The pandas DataFrame to add.
+            name: The name of the new table.
+            time_column: The name of the time column, if any.
+            primary_key: The name of the primary key column, if any.
+            foreign_keys: List of (child_col, parent_table, parent_col) tuples.
+            column_types: Dictionary mapping column names to RDBColumnDType strings
+                          (e.g., 'float', 'datetime', 'category') to override inference.
+
+        Returns:
+            A new RDB instance with the added table.
+        """
+        if name in self.table_names:
+            raise ValueError(f"Table '{name}' already exists in RDB.")
+
+        foreign_keys = foreign_keys or []
+        column_types = column_types or {}
+
+        # Build FK map: col -> (parent_table, parent_col)
+        fk_map = {}
+        for child_col, parent_table, parent_col in foreign_keys:
+             fk_map[child_col] = (parent_table, parent_col)
+
+        columns = []
+        for col_name in dataframe.columns:
+            # Skip unnamed index columns often created by pandas
+            if "Unnamed" in str(col_name):
+                continue
+
+            is_fk = col_name in fk_map
+            hint = column_types.get(col_name)
+
+            # Infer Type using utility
+            dtype = infer_semantic_type(
+                series=dataframe[col_name],
+                col_name=col_name,
+                pk_col=primary_key,
+                time_col=time_column,
+                is_foreign_key=is_fk,
+                explicit_type_hint=hint
+            )
+
+            col_schema = RDBColumnSchema(name=col_name, dtype=dtype)
+
+            # Manually set link_to for FKs
+            if is_fk:
+                parent_table, parent_col = fk_map[col_name]
+                setattr(col_schema, 'link_to', f"{parent_table}.{parent_col}")
+
+            columns.append(col_schema)
+
+        new_table_schema = RDBTableSchema(
+            name=name,
+            source=f"{name}.parquet",
+            format=RDBTableDataFormat.PARQUET,
+            columns=columns,
+            time_column=time_column
+        )
+
+        # Add table to RDB
+        new_tables_dict = self.tables.copy()
+        new_tables_dict[name] = dataframe
+        new_metadata_dict = {name: new_table_schema}
+
+        return self.create_new_with_tables_and_metadata(new_tables_dict, new_metadata_dict)
+
     @property
     def sqlalchemy_metadata(self) -> sqlalchemy.MetaData:
         """Get SQLAlchemy metadata for the RDB."""
         metadata = MetaData()
-        
+
         # First pass: Create tables without foreign keys
         sql_tables = {}
         for table_schema in self.metadata.tables:
@@ -214,29 +293,29 @@ class RDB:
                     sql_type = String
                 else:
                     sql_type = String
-                
+
                 # Create column (add foreign keys later)
                 if col_schema.dtype == RDBColumnDType.primary_key:
                     col = Column(col_schema.name, sql_type, primary_key=True)
                 else:
                     col = Column(col_schema.name, sql_type)
-                
+
                 columns.append(col)
-            
+
             sql_table = Table(table_schema.name, metadata, *columns)
             sql_tables[table_schema.name] = sql_table
-        
+
         # Second pass: Add foreign key constraints after all tables are created
         for child_table, child_col, parent_table, parent_col in self.get_relationships():
             child_sql_table = sql_tables[child_table]
-            
+
             # Find the child column and add foreign key
             for col in child_sql_table.columns:
                 if col.name == child_col:
                     fk = ForeignKey(f"{parent_table}.{parent_col}")
                     col.foreign_keys.add(fk)
                     break
-        
+
         return metadata
 
 

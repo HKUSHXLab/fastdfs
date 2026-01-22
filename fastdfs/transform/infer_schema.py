@@ -11,6 +11,7 @@ from ..dataset.meta import (
 )
 from ..dataset.rdb import RDB
 from .base import RDBTransform
+from ..utils.type_inference import infer_semantic_type
 
 class InferSchemaTransform(RDBTransform):
     """
@@ -143,43 +144,18 @@ class InferSchemaTransform(RDBTransform):
         return rdb.create_new_with_tables_and_metadata(new_tables, new_table_schemas)
 
     def _infer_dtype(self, df, col_name, table_name, pk_col, time_col, fk_map):
-        # Check PK first - this is a structural hint that takes precedence
-        if col_name == pk_col:
-            return RDBColumnDType.primary_key
-            
-        # Check FK next
-        if (table_name, col_name) in fk_map:
-            return RDBColumnDType.foreign_key
-
-        # Check hints for other types
-        if table_name in self.type_hints and col_name in self.type_hints[table_name]:
-            return RDBColumnDType(self.type_hints[table_name][col_name])
-            
-        # Check Time Col
-        if col_name == time_col:
-            return RDBColumnDType.datetime_t
-            
-        # Infer from data
-        col_data = df[col_name]
+        is_foreign_key = (table_name, col_name) in fk_map
         
-        if pd.api.types.is_datetime64_any_dtype(col_data):
-            return RDBColumnDType.datetime_t
+        explicit_type_hint = None
+        if table_name in self.type_hints and col_name in self.type_hints[table_name]:
+            explicit_type_hint = self.type_hints[table_name][col_name]
             
-        if pd.api.types.is_float_dtype(col_data):
-            return RDBColumnDType.float_t
-            
-        if pd.api.types.is_integer_dtype(col_data) or pd.api.types.is_bool_dtype(col_data):
-            # Treat integers as float for feature engineering usually
-            return RDBColumnDType.float_t
-            
-        if pd.api.types.is_object_dtype(col_data) or pd.api.types.is_string_dtype(col_data):
-            try:
-                n_unique = col_data.nunique()
-                if n_unique < self.category_threshold: # Threshold
-                    return RDBColumnDType.category_t
-                else:
-                    return RDBColumnDType.text_t
-            except TypeError:
-                return RDBColumnDType.text_t
-                
-        return RDBColumnDType.text_t
+        return infer_semantic_type(
+            series=df[col_name],
+            col_name=col_name,
+            pk_col=pk_col,
+            time_col=time_col,
+            is_foreign_key=is_foreign_key,
+            explicit_type_hint=explicit_type_hint,
+            category_threshold=self.category_threshold
+        )

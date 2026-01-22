@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastdfs"
-version = "0.1.0"
-description = "Fast Deep Feature Synthesis for tabular data - extracted from tab2graph"
+version = "0.2.0"
+description = "Fast Deep Feature Synthesis for tabular data"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
@@ -32,7 +32,7 @@ requires-python = ">=3.10"
 # Core dependencies (minimal set focused on DFS)
 dependencies = [
     # Data processing
-    "pandas",
+    "pandas>=2.3.3,<3.0",  # pandas>=3.0 will raise issue related to woodwork
     "numpy",
     "scipy",
     "scikit-learn",
@@ -48,7 +48,6 @@ dependencies = [
     # Configuration and CLI
     "pydantic",
     "pyyaml",
-    "typer",
     "tqdm",
     
     # Utilities
@@ -81,9 +80,6 @@ all = [
     "psycopg2-binary",
     "pymysql",
 ]
-
-[project.scripts]
-fastdfs = "fastdfs.cli.main:app"
 
 [project.urls]
 Homepage = "https://github.com/dglai/tab2graph"
