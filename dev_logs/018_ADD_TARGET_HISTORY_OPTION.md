@@ -80,20 +80,24 @@ features = compute_dfs_features(
 
 ## 6. Safety & Validation
 *   **Duplicate Names**: Raise `ValueError` if `name` already exists in `rdb.table_names`.
-*   **Invalid Foreign Keys**: Raise `ValueError` if `parent_table` or `parent_col` does not exist.
 *   **Type Compatibility**: Ensure inferred types are valid `RDBColumnDType` values.
 
 ## 7. Action Plan
 
-- [ ] Implement `RDB.add_table` method in `fastdfs/dataset/rdb.py`.
-- [ ] Add unit tests for `add_table` in `tests/test_rdb.py`:
+- [x] Implement `RDB.add_table` method in `fastdfs/dataset/rdb.py`.
+- [x] Add unit tests for `add_table` in `tests/test_rdb.py`:
     - Test success case with inferred types.
     - Test success case with manual `column_types` override.
     - Test error case: Duplicate table name.
-- [ ] Create an integration test `tests/test_target_history.py` that simulates the "target history" flow:
+- [x] Create an integration test `tests/test_target_history.py` that simulates the "target history" flow:
     - Create RDB.
     - Create Target DF.
     - Augment RDB with Target DF using `add_table`.
     - Run DFS and verify features like `MEAN(__target_history__.value)` are generated.
-- [ ] Update `docs/api_reference.md` to document the new `add_table` method.
-- [ ] Update `docs/user_guide.md` with a "Target History" section or "Advanced RDB Manipulation" section showing the example.
+- [x] Update `docs/api_reference.md` to document the new `add_table` method.
+- [x] Update `docs/user_guide.md` with a "Target History" section or "Advanced RDB Manipulation" section showing the example.
+- [x] **Refinement (2026-01-22)**:
+    - Extract type inference logic to `fastdfs/utils/type_inference.py`.
+    - Refactor `fastdfs/transform/infer_schema.py` to use shared utility.
+    - Optimize `add_table` implementation to use `infer_semantic_type` directly instead of full `InferSchemaTransform` pass.
+    - Relax validation in `add_table` to allow foreign keys to non-existent parent tables (to support dummy table generation).
