@@ -605,6 +605,46 @@ for i in range(0, len(target_df), chunk_size):
 final_features = pd.concat(all_features, ignore_index=True)
 ```
 
+## Advanced: Target History Augmentation
+
+In many time-series prediction tasks, features derived from past target values (e.g., "average of user's past ratings") are highly predictive. By default, DFS algorithms only see data in the RDB tables, not the target dataframe.
+
+You can augment the RDB with your target dataframe to generate these features automatically using `add_table`.
+
+### Adding Target History
+
+```python
+# 1. Existing RDB
+rdb = fastdfs.load_rdb("ecommerce/")
+
+# 2. Your target dataframe (e.g. user, item, timestamp, rating)
+target_df = pd.DataFrame(...)
+
+# 3. Add target dataframe as a table to the RDB
+# This allows DFS to generate features like user.MEAN(history.rating)
+rdb_augmented = rdb.add_table(
+    dataframe=target_df,
+    name="history",
+    time_column="timestamp",
+    foreign_keys=[
+        ("user_id", "users", "user_id"),
+        ("item_id", "items", "item_id")
+    ]
+)
+
+# 4. Run DFS with the augmented RDB
+features = fastdfs.compute_dfs_features(
+    rdb=rdb_augmented,
+    target_dataframe=target_df, # or a prediction subset
+    key_mappings={"user_id": "users.user_id", "item_id": "items.item_id"},
+    cutoff_time_column="timestamp"
+)
+```
+
+**Key Benefits:**
+- **Automatic Lag Features**: Generates rolling means, counts, etc. on past target values.
+- **Leakage Prevention**: DFS strictly enforces cutoff times, so features at time `t` only use history `< t`.
+
 ## Troubleshooting
 
 ### Common Issues

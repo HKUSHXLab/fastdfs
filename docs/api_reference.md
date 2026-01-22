@@ -288,6 +288,43 @@ Get relationships between tables.
 **Returns:**
 - List of tuples: `(child_table, child_column, parent_table, parent_column)`
 
+#### `add_table(...) -> RDB`
+Add a new table to the RDB. Returns a new RDB instance with inferred schema.
+
+```python
+def add_table(
+    self, 
+    dataframe: pd.DataFrame, 
+    name: str, 
+    time_column: Optional[str] = None,
+    primary_key: Optional[str] = None,
+    foreign_keys: Optional[List[Tuple[str, str, str]]] = None,
+    column_types: Optional[Dict[str, str]] = None
+) -> 'RDB'
+```
+
+**Parameters:**
+- `dataframe` (pd.DataFrame): The data to add
+- `name` (str): Name of the new table
+- `time_column` (Optional[str]): Name of the time column
+- `primary_key` (Optional[str]): Name of the primary key column
+- `foreign_keys` (Optional[List[Tuple]]): List of `(child_col, parent_table, parent_col)`
+- `column_types` (Optional[Dict[str, str]]): Type overrides (e.g., `{"status": "category"}`)
+
+**Returns:**
+- `RDB`: A new RDB instance containing the added table
+
+**Example:**
+```python
+# Add a history table linked to users
+rdb = rdb.add_table(
+    history_df,
+    name="history",
+    time_column="timestamp",
+    foreign_keys=[("user_id", "users", "user_id")]
+)
+```
+
 **Example:**
 ```python
 rdb = fastdfs.load_rdb("ecommerce_rdb/")

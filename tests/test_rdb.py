@@ -15,7 +15,7 @@ import shutil
 from pathlib import Path
 
 from fastdfs.dataset.rdb import RDB
-from fastdfs.dataset.meta import RDBColumnDType, RDBTableDataFormat
+from fastdfs.dataset.meta import RDBColumnDType, RDBTableDataFormat, RDBTableSchema, RDBColumnSchema, RDBMeta
 
 
 class TestRDBDataset:
@@ -225,3 +225,108 @@ class TestRDBDatasetEdgeCases:
             
             with pytest.raises(ValueError, match="Column nonexistent_column not found"):
                 RDB(dataset_path)
+
+class TestRDBAddTable:
+    """Test suite for RDB.add_table method."""
+    
+    @pytest.fixture
+    def rdb(self):
+        """Create a simple in-memory RDB."""
+        user_df = pd.DataFrame({"user_id": [1, 2], "age": [25, 30]})
+        
+        # Manually construct minimal RDB without validation overhead
+        user_schema = RDBTableSchema(
+            name="user",
+            source="user.parquet",
+            format=RDBTableDataFormat.PARQUET,
+            columns=[
+                RDBColumnSchema(name="user_id", dtype=RDBColumnDType.primary_key),
+                RDBColumnSchema(name="age", dtype=RDBColumnDType.float_t)
+            ]
+        )
+        metadata = RDBMeta(name="test_rdb", tables=[user_schema])
+        tables = {"user": user_df}
+        return RDB(metadata=metadata, tables=tables)
+
+    def test_add_table_basic(self, rdb):
+        """Test adding a simple table with type inference."""
+        new_df = pd.DataFrame({
+            "id": [1, 2],
+            "value": [10.5, 20.0],
+            "is_valid": [True, False],
+            "cat": ["A", "B"]
+        })
+        
+        new_rdb = rdb.add_table(new_df, "new_table")
+        
+        assert "new_table" in new_rdb.table_names
+        assert "user" in new_rdb.table_names
+        
+        # Verify schema inference
+        meta = new_rdb.get_table_metadata("new_table")
+        col_types = {col.name: col.dtype for col in meta.columns}
+        
+        assert col_types["id"] == RDBColumnDType.float_t
+        assert col_types["value"] == RDBColumnDType.float_t
+        assert col_types["is_valid"] == RDBColumnDType.float_t # bool -> float
+        # Low cardinality string is inferred as category by default logic (threshold=10)
+        assert col_types["cat"] == RDBColumnDType.category_t
+
+    def test_add_table_with_keys_and_time(self, rdb):
+        """Test adding table with PK, FK, Time and manual types."""
+        history_df = pd.DataFrame({
+            "hist_id": [101, 102],
+            "user_id": [1, 2],
+            "timestamp": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            "status": ["active", "inactive"]
+        })
+        
+        new_rdb = rdb.add_table(
+            history_df,
+            "history",
+            time_column="timestamp",
+            primary_key="hist_id",
+            foreign_keys=[("user_id", "user", "user_id")],
+            column_types={"status": "category"}
+        )
+        
+        meta = new_rdb.get_table_metadata("history")
+        col_types = {col.name: col.dtype for col in meta.columns}
+        
+        assert col_types["hist_id"] == RDBColumnDType.primary_key
+        assert col_types["user_id"] == RDBColumnDType.foreign_key
+        assert col_types["timestamp"] == RDBColumnDType.datetime_t
+        assert col_types["status"] == RDBColumnDType.category_t
+        
+        assert meta.time_column == "timestamp"
+        
+        # Verify relationships
+        rels = new_rdb.get_relationships()
+        assert ("history", "user_id", "user", "user_id") in rels
+
+    def test_add_table_duplicate_name(self, rdb):
+        """Test error when adding duplicate table name."""
+        with pytest.raises(ValueError, match="Table 'user' already exists"):
+            rdb.add_table(pd.DataFrame(), "user")
+
+    def test_add_table_invalid_fk_parent(self, rdb):
+        """
+        Test that adding table with invalid FK parent does NOT raise error.
+        User specified that validation should be skipped to allow dummy table generation later.
+        """
+        df = pd.DataFrame({"uid": [1]})
+        
+        # This should succeed now without ValueError
+        new_rdb = rdb.add_table(df, "test", foreign_keys=[("uid", "nonexistent", "id")])
+        
+        # Verify table exists
+        assert "test" in new_rdb.table_names
+        
+        # Verify FK was recorded in metadata
+        meta = new_rdb.get_table_metadata("test")
+        col_sch = next(c for c in meta.columns if c.name == "uid")
+        assert col_sch.dtype == RDBColumnDType.foreign_key
+        # link_to only exists if we added it (via extra='allow' or setattr hack)
+        # Using getattr to be safe if attribute missing in some implementation
+        assert getattr(col_sch, 'link_to', None) == "nonexistent.id"
+
