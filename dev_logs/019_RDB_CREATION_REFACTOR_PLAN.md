@@ -136,36 +136,36 @@ If we were to remove bulk update capability and force transforms to loop over `u
 ### Conclusion
 We retain the "Bulk Update" capability via `update_tables` as the primary engine method, and offer `update_table` for user convenience.
 
-## 6. Implementation Checklist (TODO)
+## 6. Implementation Checklist (Done)
 
-- [ ] **Step 1: Utilities Refactor**
-    - [ ] Rename `fastdfs/utils/type_inference.py` -> `fastdfs/utils/type_utils.py`.
-    - [ ] Add `safe_convert_to_string` to `type_utils.py`.
-    - [ ] Update imports in `fastdfs/dataset/rdb.py`, `fastdfs/transform/*.py`, tests.
+- [x] **Step 1: Utilities Refactor**
+    - [x] Rename `fastdfs/utils/type_inference.py` -> `fastdfs/utils/type_utils.py`.
+    - [x] Add `safe_convert_to_string` to `type_utils.py`.
+    - [x] Update imports in `fastdfs/dataset/rdb.py`, `fastdfs/transform/*.py`, tests.
 
-- [ ] **Step 2: RDB Core Refactor**
-    - [ ] Implement `RDB.update_tables` using `__init__`.
-    - [ ] Implement `RDB.update_table`.
-    - [ ] Implement `RDB.add_table` (update existing).
-    - [ ] Remove `create_new_with_tables...` methods.
-    - [ ] Update `validate_key_consistency` (relax missing parent check).
-    - [ ] Implement `RDB.canonicalize_key_types`.
+- [x] **Step 2: RDB Core Refactor**
+    - [x] Implement `RDB.update_tables` using `__init__`.
+    - [x] Implement `RDB.update_table`.
+    - [x] Implement `RDB.add_table` (update existing).
+    - [x] Remove `create_new_with_tables...` methods.
+    - [x] Update `validate_key_consistency` (relax missing parent check).
+    - [x] Implement `RDB.canonicalize_key_types`.
 
-- [ ] **Step 3: Update Call Sites**
-    - [ ] Refactor `fastdfs/transform/base.py`.
-    - [ ] Refactor `fastdfs/transform/dummy_table_transform.py`.
-    - [ ] Refactor `fastdfs/transform/fill_missing_pk.py`.
-    - [ ] Refactor `fastdfs/transform/infer_schema.py`.
+- [x] **Step 3: Update Call Sites**
+    - [x] Refactor `fastdfs/transform/base.py`.
+    - [x] Refactor `fastdfs/transform/dummy_table_transform.py`.
+    - [x] Refactor `fastdfs/transform/fill_missing_pk.py`.
+    - [x] Refactor `fastdfs/transform/infer_schema.py`.
 
-- [ ] **Step 4: Verify Tests**
-    - [ ] Fix/Update `tests/test_rdb.py`.
-    - [ ] Fix/Update `tests/test_dummy_table_transform.py`.
-    - [ ] Fix/Update `tests/test_fill_missing_primary_key.py`.
-    - [ ] Add unit tests for `RDB.update_table` and `RDB.update_tables`.
-    - [ ] Add unit tests for `RDB.canonicalize_key_types` (valid and error cases).
-    - [ ] Add unit tests for `safe_convert_to_string`.
-    - [ ] Run full test suite.
+- [x] **Step 4: Verify Tests**
+    - [x] Fix/Update `tests/test_rdb.py`.
+    - [x] Fix/Update `tests/test_dummy_table_transform.py`.
+    - [x] Fix/Update `tests/test_fill_missing_primary_key.py`.
+    - [x] Add unit tests for `RDB.update_table` and `RDB.update_tables`.
+    - [x] Add unit tests for `RDB.canonicalize_key_types` (valid and error cases).
+    - [x] Add unit tests for `safe_convert_to_string`.
+    - [x] Run full test suite.
 
-- [ ] **Step 5: Documentation**
-    - [ ] Update documentation for `RDB` class changes (APIs).
-    - [ ] Update User Guide if necessary (showing `canonicalize_key_types` or `update_tables` usage).
+- [x] **Step 5: Documentation**
+    - [x] Update documentation for `RDB` class changes (APIs).
+    - [x] Update User Guide if necessary (showing `canonicalize_key_types` or `update_tables` usage).
