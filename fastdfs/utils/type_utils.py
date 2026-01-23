@@ -15,7 +15,8 @@ def safe_convert_to_string(series: pd.Series) -> pd.Series:
 
     # Strictly forbid Float
     if pd.api.types.is_float_dtype(series):
-         raise ValueError(f"Cannot safe convert float column to string key. Please convert {series.name} to integer or string explicitly.")
+        print(series)
+        raise ValueError(f"Cannot safe convert float column to string key. Please convert {series.name} to integer or string explicitly.")
 
     return series.astype(str)
 

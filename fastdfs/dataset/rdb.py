@@ -407,7 +407,7 @@ class RDB:
             if child_table not in cols_to_convert:
                 cols_to_convert[child_table] = set()
             cols_to_convert[child_table].add(child_col)
-            
+
         # Perform conversion
         new_tables_metadata = {}
         for table_name in self.table_names:

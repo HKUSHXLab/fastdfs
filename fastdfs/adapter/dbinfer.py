@@ -31,25 +31,24 @@ class DBInferAdapter:
         Apply dataset-specific fixes for known issues in raw data.
         """
         if self.dataset_name == "diginetica":
-            # Fix View table userId being float with NaNs
-            target_table = "View"
+            # Fix View and Purchase table userId being float with NaNs
+            target_tables = ["View", "Purchase", "Query"]
             target_col = "userId"
             
-            if target_table in tables:
-                df = tables[target_table]
-                if target_col in df.columns:
-                     # Convert float with NaN to string (handling integer conversion)
-                     # e.g. 123.0 -> "123", NaN -> None
-                     def convert_float_id(x):
-                         if pd.isna(x):
-                             return None 
-                         try:
-                             return str(int(x))
-                         except (ValueError, TypeError):
-                             return str(x)
-                     
-                     df[target_col] = df[target_col].apply(convert_float_id).astype(object)
-                     logger.info(f"Fixed {target_table}.{target_col} in {self.dataset_name}: converted float to string IDs.")
+            for target_table in target_tables:
+                if target_table in tables:
+                    df = tables[target_table]
+                    if target_col in df.columns:
+                        # Convert float with NaN to string (handling integer conversion)
+                        # e.g. 123.0 -> "123", NaN -> None
+                        def convert_float_id(x):
+                            if pd.isna(x):
+                                return None 
+                            else:
+                                return str(int(x))
+
+                        df[target_col] = df[target_col].apply(convert_float_id).astype(object)
+                        logger.info(f"Fixed {target_table}.{target_col} in {self.dataset_name}: converted float to string IDs.")
 
     def load(self) -> RDB:
         """
