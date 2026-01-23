@@ -99,6 +99,29 @@ Tests verifying the calls (checking mocks) need to be updated.
 
 *(From previous analysis)*
 
+## 6. Execution & Deviations (Jan 23, 2026)
+
+During implementation, several refinements were made to enforce stricter data consistency and type safety.
+
+### 6.1 Strict `update_tables` API
+Instead of optional arguments (`tables=None, metadata=None`), the implementation now enforces:
+-   **Mandatory Arguments**: Both `tables` and `metadata` must be provided (dictionaries, can be empty).
+-   **Key Consistency**: `set(tables.keys())` must exactly match `set(metadata.keys())`. This prevents "widowed" data (tables without schemas) or "ghost" metadata.
+-   **Schema Validation**: The columns in the provided DataFrame are checked against the provided RDBTableSchema. Any column in the DataFrame missing from the Schema raises a `ValueError`.
+
+### 6.2 Strict `update_table` API
+-   **Mandatory Schema**: The `schema` argument is now required.
+-   **Reasoning**: Implicit behavior (inferring schemas or fetching existing ones inside a method that implies mutation) was deemed too fragile used in an immutable-style API. The caller must explicit provide the schema describing the new state of the table.
+
+### 6.3 Validation Logic Polish
+-   **FK Group Validation**: `validate_key_consistency` groups Foreign Keys by their target (parent). Even if the parent table is missing (common in partial loads), the validator checks consistency *among* the sibling children.
+-   **Strict Float Rejection**: The `safe_convert_to_string` utility used by `canonicalize_key_types` explicitly raises a `ValueError` for floating-point types to prevent dangerous ID conversions (e.g. `10.0` -> `"10.0"` instead of `"10"`).
+
+### 6.4 Test Restructuring
+-   Unit tests for utilities were moved to `tests/utils/`.
+-   New API tests were merged into `tests/test_rdb.py`, which was reorganized into class-based suites (`TestRDBConstruction`, `TestRDBMutation`, etc.).
+
+
 ### The Cost of Single-Item Updates (Looping)
 If we were to remove bulk update capability and force transforms to loop over `update_table`:
 -   **Data Cost**: Negligible (Pandas DataFrames are passed by reference).
