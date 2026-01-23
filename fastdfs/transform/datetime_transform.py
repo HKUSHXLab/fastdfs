@@ -19,10 +19,10 @@ class FeaturizeDatetime(ColumnTransform):
     def __init__(self, features: List[str] = None, retain_original: bool = True):
         """
         Initialize datetime featurizer.
-        
+
         Args:
-            features: List of features to extract. 
-                     Options: ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek']
+            features: List of features to extract.
+                     Options: ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'epochtime']
                      Default extracts: ['year', 'month', 'day', 'hour']
             retain_original: Whether to keep the original datetime column. Default is True.
         """

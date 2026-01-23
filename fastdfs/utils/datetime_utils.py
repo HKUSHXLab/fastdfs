@@ -41,19 +41,19 @@ def dt2second(dt : np.ndarray) -> np.ndarray:
 def featurize_datetime_column(column: pd.Series, features: List[str]) -> pd.DataFrame:
     """
     Extract multiple datetime features from a datetime column.
-    
+
     Args:
         column: Pandas Series with datetime values
-        features: List of features to extract. Options: 
-                 ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek']
-    
+        features: List of features to extract. Options:
+                 ['year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'epochtime']
+
     Returns:
         DataFrame with extracted datetime features, preserving the original column's index
     """
     # Preserve the original index to avoid alignment issues
     result_df = pd.DataFrame(index=column.index)
     base_name = column.name or 'datetime'
-    
+
     # Map feature names to extraction functions
     feature_funcs = {
         'year': dt2year,
@@ -62,7 +62,8 @@ def featurize_datetime_column(column: pd.Series, features: List[str]) -> pd.Data
         'hour': dt2hour,
         'minute': dt2minute,
         'second': dt2second,
-        'dayofweek': dt2dayofweek
+        'dayofweek': dt2dayofweek,
+        'epochtime': dt2ts
     }
     
     # Extract requested features

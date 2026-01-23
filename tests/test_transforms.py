@@ -105,6 +105,25 @@ class TestFeaturizeDatetime:
         assert not any(s.name == self.datetime_metadata.name for s in result_schemas)
         assert 'timestamp_year' in result_df.columns
 
+    def test_epochtime_known_values(self):
+        """Test epochtime with known expected values."""
+        # Unix epoch should be 0
+        epoch_date = pd.Series([pd.Timestamp('1970-01-01T00:00:00')], name='epoch')
+        epoch_metadata = RDBColumnSchema(name='epoch', dtype=RDBColumnDType.datetime_t)
+
+        transform_epochtime = FeaturizeDatetime(features=['epochtime'], retain_original=False)
+        result_df, _ = transform_epochtime(epoch_date, epoch_metadata)
+
+        assert result_df['epoch_epochtime'].iloc[0] == 0
+
+        # Test a known date
+        known_date = pd.Series([pd.Timestamp('2020-01-01T00:00:00')], name='known')
+        known_metadata = RDBColumnSchema(name='known', dtype=RDBColumnDType.datetime_t)
+
+        result_df, _ = transform_epochtime(known_date, known_metadata)
+        expected_ns = pd.Timestamp('2020-01-01').value
+        assert result_df['known_epochtime'].iloc[0] == expected_ns
+
 
 class TestFilterColumn:
     """Test column filtering transform."""
