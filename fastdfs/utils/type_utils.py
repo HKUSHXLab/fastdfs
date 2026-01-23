@@ -1,6 +1,24 @@
 import pandas as pd
+import numpy as np
 from typing import Optional
 from ..dataset.meta import RDBColumnDType
+
+def safe_convert_to_string(series: pd.Series) -> pd.Series:
+    """
+    Safely convert a pandas Series to string type for key consistency.
+    
+    Raises:
+         ValueError: If the series is of floating point type.
+    """
+    if series.empty:
+        return series.astype(str)
+
+    # Strictly forbid Float
+    if pd.api.types.is_float_dtype(series):
+         raise ValueError(f"Cannot safe convert float column to string key. Please convert {series.name} to integer or string explicitly.")
+
+    return series.astype(str)
+
 
 def infer_semantic_type(
     series: pd.Series,

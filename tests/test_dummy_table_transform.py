@@ -95,11 +95,15 @@ class TestHandleDummyTable:
         # Execute
         result_dataset = self.transform(self.mock_dataset)
         
-        # Verify create_new_with_tables_and_metadata was called
-        self.mock_dataset.create_new_with_tables_and_metadata.assert_called_once()
-        call_args = self.mock_dataset.create_new_with_tables_and_metadata.call_args
-        new_tables = call_args[1]['new_tables']
-        new_metadata = call_args[1]['new_metadata']
+        # Verify update_tables was called
+        self.mock_dataset.update_tables.assert_called_once()
+        call_args = self.mock_dataset.update_tables.call_args
+        # call_args is (args, kwargs). update_tables takes kwargs or args safely.
+        # But wait, how was it called in implementation? 
+        # dataset.update_tables(tables=new_tables, metadata=new_metadata)
+        # So check kwargs
+        new_tables = call_args.kwargs['tables']
+        new_metadata = call_args.kwargs['metadata']
         
         # Check if dummy table was created
         assert 'missing_table' in new_tables
@@ -120,7 +124,7 @@ class TestHandleDummyTable:
         result = self.transform(self.mock_dataset)
         
         assert result == self.mock_dataset
-        self.mock_dataset.create_new_with_tables_and_metadata.assert_not_called()
+        self.mock_dataset.update_tables.assert_not_called()
 
     def test_no_missing_tables(self):
         """Test when all referenced tables exist."""
@@ -131,4 +135,4 @@ class TestHandleDummyTable:
         result = self.transform(self.mock_dataset)
         
         assert result == self.mock_dataset
-        self.mock_dataset.create_new_with_tables_and_metadata.assert_not_called()
+        self.mock_dataset.update_tables.assert_not_called()

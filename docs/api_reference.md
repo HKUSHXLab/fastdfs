@@ -254,7 +254,30 @@ class RDB:
     
     def get_relationships(self) -> List[Tuple[str, str, str, str]]
     
-    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB'
+    def update_tables(
+        self, 
+        tables: Dict[str, pd.DataFrame], 
+        metadata: Dict[str, RDBTableSchema]
+    ) -> 'RDB'
+
+    def update_table(
+        self,
+        name: str,
+        dataframe: pd.DataFrame,
+        schema: RDBTableSchema
+    ) -> 'RDB'
+
+    def add_table(
+        self,
+        dataframe: pd.DataFrame,
+        name: str,
+        time_column: Optional[str] = None,
+        primary_key: Optional[str] = None,
+        foreign_keys: Optional[List[Tuple[str, str, str]]] = None,
+        column_types: Optional[Dict[str, str]] = None
+    ) -> 'RDB'
+    
+    def canonicalize_key_types(self) -> 'RDB'
 ```
 
 **Properties:**

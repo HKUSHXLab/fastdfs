@@ -133,10 +133,10 @@ class TestFillMissingPrimaryKey:
         # Apply transform
         result_rdb = self.transform(mock_rdb)
         
-        # Verify create_new_with_tables_and_metadata was called
-        mock_rdb.create_new_with_tables_and_metadata.assert_called_once()
-        call_args = mock_rdb.create_new_with_tables_and_metadata.call_args
-        new_tables = call_args[0][0]  # First positional argument
+        # Verify update_tables was called
+        mock_rdb.update_tables.assert_called_once()
+        call_args = mock_rdb.update_tables.call_args
+        new_tables = call_args.kwargs['tables']  # First positional argument
         
         # Check Product table was expanded
         expanded_product = new_tables['Product']
@@ -199,8 +199,8 @@ class TestFillMissingPrimaryKey:
         result_rdb = self.transform(mock_rdb)
         
         # Get result
-        call_args = mock_rdb.create_new_with_tables_and_metadata.call_args
-        new_tables = call_args[0][0]
+        call_args = mock_rdb.update_tables.call_args
+        new_tables = call_args.kwargs['tables']
         
         # Check Product table remains unchanged
         result_product = new_tables['Product']
@@ -272,8 +272,8 @@ class TestFillMissingPrimaryKey:
         result_rdb = self.transform(mock_rdb)
         
         # Get result
-        call_args = mock_rdb.create_new_with_tables_and_metadata.call_args
-        new_tables = call_args[0][0]
+        call_args = mock_rdb.update_tables.call_args
+        new_tables = call_args.kwargs['tables']
         
         # Check Product expanded to include all referenced values
         result_product = new_tables['Product']
@@ -326,8 +326,8 @@ class TestFillMissingPrimaryKey:
         result_rdb = self.transform(mock_rdb)
         
         # Get result
-        call_args = mock_rdb.create_new_with_tables_and_metadata.call_args
-        new_tables = call_args[0][0]
+        call_args = mock_rdb.update_tables.call_args
+        new_tables = call_args.kwargs['tables']
         
         # Check Product was populated
         result_product = new_tables['Product']
@@ -380,8 +380,8 @@ class TestFillMissingPrimaryKey:
         result_rdb = self.transform(mock_rdb)
         
         # Get result
-        call_args = mock_rdb.create_new_with_tables_and_metadata.call_args
-        new_tables = call_args[0][0]
+        call_args = mock_rdb.update_tables.call_args
+        new_tables = call_args.kwargs['tables']
         
         # Check Product remains unchanged
         result_product = new_tables['Product']
@@ -419,5 +419,5 @@ class TestFillMissingPrimaryKey:
         
         # Verify early return - should return original RDB
         assert result_rdb == mock_rdb
-        mock_rdb.create_new_with_tables_and_metadata.assert_not_called()
+        mock_rdb.update_tables.assert_not_called()
     
