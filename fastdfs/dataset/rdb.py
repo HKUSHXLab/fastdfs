@@ -10,9 +10,10 @@ from typing import Dict, List, Tuple, Optional, Union
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import MetaData, Table, Column, String, ForeignKey, Float, DateTime
+from loguru import logger
 
 from ..utils import yaml_utils
-from ..utils.type_inference import infer_semantic_type
+from ..utils.type_utils import infer_semantic_type, safe_convert_to_string
 from .loader import get_table_data_loader
 from .meta import (
     RDBMeta,
@@ -138,6 +139,64 @@ class RDB:
         """
         return self.metadata.relationships
 
+    def validate_key_consistency(self) -> None:
+        """
+        Validate that primary keys and foreign keys share the same actual pandas data type.
+
+        Raises:
+            TypeError: If there is a mismatch between a primary key and a referencing foreign key.
+        """
+        relationships = self.get_relationships()
+        from loguru import logger
+        
+        # Group relationships by (parent_table, parent_col) to identifying FK groups
+        fk_groups = {}
+        for child_table, child_col, parent_table, parent_col in relationships:
+            key = (parent_table, parent_col)
+            if key not in fk_groups:
+                fk_groups[key] = []
+            fk_groups[key].append((child_table, child_col))
+            
+        for (parent_table, parent_col), children in fk_groups.items():
+            # Gather available types
+            types = []
+            
+            # Check Parent
+            if parent_table in self.tables:
+                parent_df = self.get_table_dataframe(parent_table)
+                types.append({
+                    'table': parent_table,
+                    'col': parent_col,
+                    'dtype': parent_df[parent_col].dtype,
+                    'role': 'Primary Key'
+                })
+            else:
+                 logger.debug(f"Parent table '{parent_table}' not found. Validating consistency among foreign keys only.")
+            
+            # Check Children
+            for child_table, child_col in children:
+                if child_table in self.tables:
+                     child_df = self.get_table_dataframe(child_table)
+                     types.append({
+                        'table': child_table,
+                        'col': child_col,
+                        'dtype': child_df[child_col].dtype,
+                        'role': 'Foreign Key'
+                    })
+            
+            # Validate Consistency within the group
+            if not types:
+                continue
+                
+            first = types[0]
+            for current in types[1:]:
+                if current['dtype'] != first['dtype']:
+                     raise TypeError(
+                        f"Type mismatch in key group for {parent_table}.{parent_col}. "
+                        f"{first['role']} '{first['table']}.{first['col']}' has type {first['dtype']}, "
+                        f"but {current['role']} '{current['table']}.{current['col']}' has type {current['dtype']}."
+                    )
+
     def save(self, path: Union[str, Path]):
         """
         Save the RDB to a directory.
@@ -157,42 +216,91 @@ class RDB:
         # Save metadata
         yaml_utils.save_yaml(self.metadata.model_dump(mode='json'), path / "metadata.yaml")
 
-    def create_new_with_tables(self, new_tables: Dict[str, pd.DataFrame]) -> 'RDB':
-        """Create new RDB with updated tables (keeping existing metadata)."""
-        return self.create_new_with_tables_and_metadata(new_tables, {})
-
-    def create_new_with_tables_and_metadata(
-        self,
-        new_tables: Dict[str, pd.DataFrame],
-        new_metadata: Dict[str, RDBTableSchema]
+    def update_tables(
+        self, 
+        tables: Dict[str, pd.DataFrame], 
+        metadata: Dict[str, RDBTableSchema]
     ) -> 'RDB':
-        """Create new RDB with updated tables and metadata (for transforms that modify schemas)."""
-        # Create a new instance with updated metadata and table data
-        new_dataset = RDB.__new__(RDB)
-        new_dataset.path = self.path
-        new_dataset.tables = new_tables.copy()
-
-        # Update metadata with new table schemas
-        updated_table_schemas = []
-        for table_schema in self.metadata.tables:
-            if table_schema.name in new_metadata:
-                updated_table_schemas.append(new_metadata[table_schema.name])
-            else:
-                updated_table_schemas.append(table_schema)
-
-        # Add any completely new table schemas
-        existing_table_names = {schema.name for schema in self.metadata.tables}
-        for table_name, schema in new_metadata.items():
-            if table_name not in existing_table_names:
-                updated_table_schemas.append(schema)
-
-        # Create new metadata object
-        new_dataset.metadata = RDBMeta(
+        """
+        Create a new RDB with updated/added tables and metadata.
+        
+        This method performs a "Bulk Upsert":
+        - Existing tables/metadata are preserved unless overwritten by the input.
+        - New tables/metadata in the input are added.
+        
+        Args:
+            tables: Dictionary of DataFrames to update/add.
+            metadata: Dictionary of RDBTableSchema to update/add.
+            
+        Returns:
+            New RDB instance with merged state.
+        
+        Raises:
+            ValueError: If tables and metadata keys do not match, or if column definitions are inconsistent.
+        """
+        tables = tables or {}
+        metadata = metadata or {}
+        
+        # Enforce strict consistency: Keys must match
+        if set(tables.keys()) != set(metadata.keys()):
+            raise ValueError(
+                f"Tables and metadata keys must match exactly.\n"
+                f"Tables: {list(tables.keys())}\n"
+                f"Metadata: {list(metadata.keys())}"
+            )
+            
+        # Enforce column consistency
+        for name, schema in metadata.items():
+            df = tables[name]
+            # Check if all columns in dataframe have corresponding column metadata
+            df_cols = set(df.columns)
+            schema_cols = set(col.name for col in schema.columns)
+            
+            # Check if dataframe columns are missing from schema
+            missing_in_schema = df_cols - schema_cols
+            if missing_in_schema:
+                raise ValueError(
+                    f"Table '{name}': Columns {missing_in_schema} present in DataFrame but missing from metadata schema."
+                )
+        
+        # Merge tables
+        # Use existing tables as base, update with new ones
+        merged_tables = self.tables.copy()
+        merged_tables.update(tables)
+        
+        # Merge metadata
+        # Create a map of existing schemas for easier updating
+        existing_schemas = {t.name: t for t in self.metadata.tables}
+        
+        # Update/Add new schemas
+        for name, schema in metadata.items():
+            existing_schemas[name] = schema
+            
+        merged_metadata_obj = RDBMeta(
             name=self.metadata.name,
-            tables=updated_table_schemas
+            tables=list(existing_schemas.values())
         )
+        
+        return RDB(metadata=merged_metadata_obj, tables=merged_tables)
 
-        return new_dataset
+    def update_table(
+        self,
+        name: str,
+        dataframe: pd.DataFrame,
+        schema: RDBTableSchema
+    ) -> 'RDB':
+        """
+        Update or replace a single table.
+        
+        Args:
+            name: Name of the table.
+            dataframe: New DataFrame content.
+            schema: New schema.
+        """
+        return self.update_tables(
+            tables={name: dataframe},
+            metadata={name: schema}
+        )
 
     def add_table(
         self,
@@ -219,7 +327,7 @@ class RDB:
             A new RDB instance with the added table.
         """
         if name in self.table_names:
-            raise ValueError(f"Table '{name}' already exists in RDB.")
+            raise ValueError(f"Table '{name}' already exists in RDB. Use update_table() to modify existing tables.")
 
         foreign_keys = foreign_keys or []
         column_types = column_types or {}
@@ -265,12 +373,59 @@ class RDB:
             time_column=time_column
         )
 
-        # Add table to RDB
-        new_tables_dict = self.tables.copy()
-        new_tables_dict[name] = dataframe
-        new_metadata_dict = {name: new_table_schema}
+        # Use updated API
+        return self.update_tables(
+            tables={name: dataframe}, 
+            metadata={name: new_table_schema}
+        )
+    
+    def canonicalize_key_types(self) -> 'RDB':
+        """
+        Convert all primary keys and foreign keys to string type to ensure consistency.
+        
+        Returns:
+            New RDB with canonicalized key types.
+        """
+        
+        new_tables = {}
+        relationships = self.get_relationships()
+        pks = {t.name: t.primary_key for t in self.metadata.tables if t.primary_key}
+        
+        # Identify all columns that need conversion per table
+        # Table -> Set of columns
+        cols_to_convert = {}
+        
+        # Add PKs
+        for table, pk in pks.items():
+            if table not in cols_to_convert:
+                cols_to_convert[table] = set()
+            cols_to_convert[table].add(pk)
+            
+        # Add FKs from relationships
+        # (child_table, child_col, parent_table, parent_col)
+        for child_table, child_col, _, _ in relationships:
+            if child_table not in cols_to_convert:
+                cols_to_convert[child_table] = set()
+            cols_to_convert[child_table].add(child_col)
 
-        return self.create_new_with_tables_and_metadata(new_tables_dict, new_metadata_dict)
+        # Perform conversion
+        new_tables_metadata = {}
+        for table_name in self.table_names:
+            df = self.get_table_dataframe(table_name)
+            
+            if table_name not in cols_to_convert:
+                continue
+                
+            new_df = df.copy(deep=False) # Shallow copy first, we will replace columns
+            for col in cols_to_convert[table_name]:
+                if col in new_df.columns:
+                    # Use utility to safely convert
+                    new_df[col] = safe_convert_to_string(new_df[col])
+            
+            new_tables[table_name] = new_df
+            new_tables_metadata[table_name] = self.get_table_metadata(table_name)
+        
+        return self.update_tables(tables=new_tables, metadata=new_tables_metadata)
 
     @property
     def sqlalchemy_metadata(self) -> sqlalchemy.MetaData:

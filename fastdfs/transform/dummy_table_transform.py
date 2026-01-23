@@ -43,9 +43,9 @@ class HandleDummyTable(RDBTransform):
             new_tables[table_name] = dummy_table
             new_metadata[table_name] = dummy_metadata
             
-        return dataset.create_new_with_tables_and_metadata(
-            new_tables=new_tables,
-            new_metadata=new_metadata
+        return dataset.update_tables(
+            tables=new_tables,
+            metadata=new_metadata
         )
     
     def _collect_foreign_key_references(self, dataset: RDB, relationships: List) -> Dict[str, Dict[str, Union[str, List]]]:

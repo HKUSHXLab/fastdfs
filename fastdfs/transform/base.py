@@ -178,4 +178,4 @@ class RDBTransformWrapper(RDBTransform):
                     time_column=table_metadata.time_column
                 )
         
-        return rdb.create_new_with_tables_and_metadata(new_tables, updated_metadata)
+        return rdb.update_tables(tables=new_tables, metadata=updated_metadata)

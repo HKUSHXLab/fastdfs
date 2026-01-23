@@ -55,7 +55,7 @@ class FillMissingPrimaryKey(RDBTransform):
             rdb, pk_to_fk_list, fk_to_pk, unique_keys
         )
         
-        return rdb.create_new_with_tables_and_metadata(new_tables, new_metadata)
+        return rdb.update_tables(tables=new_tables, metadata=new_metadata)
     
     def _build_key_mappings(
         self, 

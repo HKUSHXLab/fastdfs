@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import Optional, Union
 from loguru import logger
@@ -24,6 +25,30 @@ class DBInferAdapter:
         self.dataset_name = dataset_name
         self.output_dir = Path(output_dir) if output_dir else None
         self.dataset = None
+
+    def _apply_dataset_specific_fixes(self, tables: dict[str, pd.DataFrame]):
+        """
+        Apply dataset-specific fixes for known issues in raw data.
+        """
+        if self.dataset_name == "diginetica":
+            # Fix View and Purchase table userId being float with NaNs
+            target_tables = ["View", "Purchase", "Query"]
+            target_col = "userId"
+            
+            for target_table in target_tables:
+                if target_table in tables:
+                    df = tables[target_table]
+                    if target_col in df.columns:
+                        # Convert float with NaN to string (handling integer conversion)
+                        # e.g. 123.0 -> "123", NaN -> None
+                        def convert_float_id(x):
+                            if pd.isna(x):
+                                return None 
+                            else:
+                                return str(int(x))
+
+                        df[target_col] = df[target_col].apply(convert_float_id).astype(object)
+                        logger.info(f"Fixed {target_table}.{target_col} in {self.dataset_name}: converted float to string IDs.")
 
     def load(self) -> RDB:
         """
@@ -100,6 +125,9 @@ class DBInferAdapter:
             
             if table_meta.time_column:
                 time_columns[table_name] = table_meta.time_column
+
+        # Apply dataset specific fixes
+        self._apply_dataset_specific_fixes(tables)
 
         # Create RDB
         rdb = create_rdb(

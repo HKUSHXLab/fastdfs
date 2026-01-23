@@ -11,7 +11,7 @@ from ..dataset.meta import (
 )
 from ..dataset.rdb import RDB
 from .base import RDBTransform
-from ..utils.type_inference import infer_semantic_type
+from ..utils.type_utils import infer_semantic_type
 
 class InferSchemaTransform(RDBTransform):
     """
@@ -141,7 +141,7 @@ class InferSchemaTransform(RDBTransform):
                 time_column=time_col
             )
             
-        return rdb.create_new_with_tables_and_metadata(new_tables, new_table_schemas)
+        return rdb.update_tables(tables=new_tables, metadata=new_table_schemas)
 
     def _infer_dtype(self, df, col_name, table_name, pk_col, time_col, fk_map):
         is_foreign_key = (table_name, col_name) in fk_map
