@@ -19,6 +19,7 @@ class RDBColumnDType(str, Enum):
     datetime_t = 'datetime'      # np.datetime64
     text_t = 'text'              # str
     timestamp_t = 'timestamp'    # pandas.Int64 to allow NaN
+    multiset_t = 'multiset'      # List[str] - multiple labels/tags per item
     foreign_key = 'foreign_key'  # str
     primary_key = 'primary_key'  # str
 
