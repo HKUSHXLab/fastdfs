@@ -172,9 +172,9 @@ class FeaturizeMultiset(ColumnTransform):
         )
         new_column_schemas.append(others_count_schema)
         
-        # Step 5: Handle original column retention
+        # Step 5: Handle original column retention. Make sure that no multiset type is passed forward.
         if self.retain_original:
             feature_df[base_name] = column
-            new_column_schemas.insert(0, column_metadata)
+            new_column_schemas.insert(0, RDBColumnSchema(name=base_name, dtype=RDBColumnDType.text_t))
         
         return feature_df, new_column_schemas
