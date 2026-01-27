@@ -110,6 +110,9 @@ class RelBenchAdapter:
                 cols_to_drop.extend(["ci_upper_limit_raw", "ci_lower_limit_raw", "p_value_raw"])
             if name == "studies":
                 cols_to_drop.append("limitations_and_caveats")
+        
+        if self.dataset_name == "rel-event" and name in["event_attendees", "user_friends"]:
+            cols_to_drop.append("Unnamed: 0")
                 
         # Only drop columns that actually exist
         existing_cols_to_drop = [c for c in cols_to_drop if c in df.columns]
