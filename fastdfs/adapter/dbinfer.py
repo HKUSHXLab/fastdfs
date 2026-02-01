@@ -26,29 +26,46 @@ class DBInferAdapter:
         self.output_dir = Path(output_dir) if output_dir else None
         self.dataset = None
 
+    @staticmethod
+    def _safe_convert_float_id(x):
+        """
+        Convert float with NaN to string (handling integer conversion)
+        e.g. 123.0 -> "123", NaN -> None
+        """
+        if pd.isna(x):
+            return None 
+        try:
+            # strict check: if it's not actually an integer, don't truncate
+            if float(x).is_integer():
+                return str(int(x))
+            else:
+                return str(x)
+        except (ValueError, TypeError):
+            return str(x)
+
     def _apply_dataset_specific_fixes(self, tables: dict[str, pd.DataFrame]):
         """
         Apply dataset-specific fixes for known issues in raw data.
         """
-        if self.dataset_name == "diginetica":
-            # Fix View and Purchase table userId being float with NaNs
-            target_tables = ["View", "Purchase", "Query"]
-            target_col = "userId"
-            
-            for target_table in target_tables:
-                if target_table in tables:
-                    df = tables[target_table]
-                    if target_col in df.columns:
-                        # Convert float with NaN to string (handling integer conversion)
-                        # e.g. 123.0 -> "123", NaN -> None
-                        def convert_float_id(x):
-                            if pd.isna(x):
-                                return None 
-                            else:
-                                return str(int(x))
+        # Config: dataset_name -> list of (table_name, column_name)
+        float_fix_config = {
+            "diginetica": [
+                ("View", "userId"),
+                ("Purchase", "userId"),
+                ("Query", "userId")
+            ],
+            "retailrocket": [
+                ("Category", "parentid")
+            ]
+        }
 
-                        df[target_col] = df[target_col].apply(convert_float_id).astype(object)
-                        logger.info(f"Fixed {target_table}.{target_col} in {self.dataset_name}: converted float to string IDs.")
+        if self.dataset_name in float_fix_config:
+            for table_name, col_name in float_fix_config[self.dataset_name]:
+                if table_name in tables:
+                    df = tables[table_name]
+                    if col_name in df.columns:
+                        df[col_name] = df[col_name].apply(self._safe_convert_float_id).astype(object)
+                        logger.info(f"Fixed {table_name}.{col_name} in {self.dataset_name}: converted float to string IDs.")
 
     def load(self) -> RDB:
         """
