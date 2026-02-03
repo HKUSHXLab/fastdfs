@@ -40,3 +40,22 @@ class TestTypeUtils:
         s = pd.Series([1, 'a'])
         res = safe_convert_to_string(s)
         assert res.tolist() == ['1', 'a']
+
+    def test_safe_convert_to_string_nullable_int_preserves_nulls(self):
+        """Nullable Int64 with pd.NA should convert values to strings and preserve NULLs.
+        """
+        s = pd.Series(pd.array([1, 2, pd.NA], dtype="Int64"), name="AdID")
+        res = safe_convert_to_string(s)
+        assert res.tolist()[:2] == ['1', '2']
+        assert pd.isna(res.iloc[2]), "NA should be preserved as pd.NA, not converted to string '<NA>'"
+        # Ensure '<NA>' literal string is NOT in the result
+        assert '<NA>' not in res.astype(str).values[:2].tolist()
+
+
+    def test_safe_convert_to_string_object_with_none(self):
+        """Object dtype with None should preserve NULLs."""
+        s = pd.Series(["a", None, "c"], name="key")
+        res = safe_convert_to_string(s)
+        assert res.iloc[0] == "a"
+        assert res.iloc[2] == "c"
+        assert pd.isna(res.iloc[1])

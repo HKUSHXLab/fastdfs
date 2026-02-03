@@ -15,10 +15,13 @@ def safe_convert_to_string(series: pd.Series) -> pd.Series:
 
     # Strictly forbid Float
     if pd.api.types.is_float_dtype(series):
-        print(series)
         raise ValueError(f"Cannot safe convert float column to string key. Please convert {series.name} to integer or string explicitly.")
 
-    return series.astype(str)
+    mask = series.isna()
+    result = series.astype(str)
+    if mask.any():
+        result[mask] = pd.NA
+    return result
 
 
 def infer_semantic_type(

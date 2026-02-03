@@ -174,6 +174,9 @@ def compute_dfs_features(
                         f"target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
                     )
 
+    # Validate key consistency across all tables in the RDB
+    rdb.validate_key_consistency()
+
     # Get the appropriate engine
     engine = get_dfs_engine(config.engine, config)
     
