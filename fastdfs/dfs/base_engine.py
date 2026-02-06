@@ -12,6 +12,7 @@ import featuretools as ft
 import numpy as np
 from loguru import logger
 import pydantic
+from woodwork.column_schema import ColumnSchema
 
 from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType, RDBColumnSchema
