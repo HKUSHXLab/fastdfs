@@ -16,7 +16,60 @@ import pydantic
 from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType, RDBColumnSchema
 
-__all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine']
+__all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine', 'Quantile25', 'Quantile75', 'DiscreteEntropy']
+
+
+# Custom quantile aggregation primitives
+class Quantile25(ft.primitives.AggregationPrimitive):
+    """Calculates the 25th percentile (Q1) of a numeric column."""
+    name = "quantile_25"
+    input_types = [ColumnSchema(semantic_tags=['numeric'])]
+    return_type = ColumnSchema(semantic_tags=['numeric'])
+    
+    def get_function(self):
+        def quantile_25(x):
+            return x.quantile(0.25)
+        return quantile_25
+
+
+class Quantile75(ft.primitives.AggregationPrimitive):
+    """Calculates the 75th percentile (Q3) of a numeric column."""
+    name = "quantile_75"
+    input_types = [ColumnSchema(semantic_tags=['numeric'])]
+    return_type = ColumnSchema(semantic_tags=['numeric'])
+    
+    def get_function(self):
+        def quantile_75(x):
+            return x.quantile(0.75)
+        return quantile_75
+
+
+class DiscreteEntropy(ft.primitives.AggregationPrimitive):
+    """Calculates the discrete entropy of a categorical column.
+    
+    Entropy formula: -Σ(p * log2(p)) where p is the probability of each category.
+    This measures the uncertainty/randomness in the categorical distribution.
+    """
+    name = "discrete_entropy"
+    input_types = [ColumnSchema(semantic_tags=['category'])]
+    return_type = ColumnSchema(semantic_tags=['numeric'])
+    
+    def get_function(self):
+        def discrete_entropy(x):
+            from collections import Counter
+            import numpy as np
+            # Drop NaN/None values
+            non_null_values = x.dropna()
+            if len(non_null_values) == 0:
+                return np.nan
+            # Count frequencies
+            counts = Counter(non_null_values)
+            total = len(non_null_values)
+            # Calculate probabilities
+            probs = [count / total for count in counts.values()]
+            # Calculate entropy: -Σ(p * log2(p))
+            return -sum(p * np.log2(p) for p in probs if p > 0)
+        return discrete_entropy
 
 class DFSConfig(pydantic.BaseModel):
     """
@@ -319,11 +372,25 @@ class DFSEngine:
             )
 
     def _convert_primitives(self, primitive_names: List[str]) -> List:
-        """Convert primitive names to primitive objects (simplified, no array primitives)."""
+        """Convert primitive names to primitive objects.
+        
+        Supports:
+        - Built-in featuretools primitives (by name string)
+        - Custom quantile primitives: 'quantile_25', 'quantile_75'
+        - Custom discrete entropy primitive: 'discrete_entropy'
+        """
         primitives = []
         for prim in primitive_names:
-            # Only support basic primitives, no array types
-            primitives.append(prim)
+            # Handle custom quantile primitives
+            if prim == "quantile_25":
+                primitives.append(Quantile25())
+            elif prim == "quantile_75":
+                primitives.append(Quantile75())
+            elif prim == "discrete_entropy":
+                primitives.append(DiscreteEntropy())
+            else:
+                # Built-in featuretools primitives (passed as string name)
+                primitives.append(prim)
         return primitives
 
     def _filter_features(

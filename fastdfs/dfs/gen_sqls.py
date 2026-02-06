@@ -16,6 +16,7 @@ from sqlglot.expressions import (
     Select,
     Identifier,
     Cast,
+    Literal,
 )
 import sqlglot
 from collections import defaultdict
@@ -436,13 +437,45 @@ class FeatureBlock:
 
     def handle_agg(self, source_column) -> Anonymous:
         # Aggregations that require numeric types (don't work with boolean in DuckDB)
-        numeric_only_primitives = ["mean", "std", "sum"]
+        numeric_only_primitives = ["mean", "std", "sum", "median", "quantile_25", "quantile_75"]
         
         array_agg_func_names = ["arraymax", "arraymin", "arraymean"]
         if self._group_by_primitive.name in array_agg_func_names:
             return Anonymous(this="array_agg", expressions=[source_column])
         elif self._group_by_primitive.name == "join":
             return Anonymous(this="string_agg", expressions=[source_column, "'\n'"])
+        elif self._group_by_primitive.name == "discrete_entropy":
+            # DuckDB has built-in entropy() function for categorical data
+            # It calculates: -SUM(p * LOG2(p)) where p = count/total
+            # Handles NULL values automatically (ignores them)
+            return Anonymous(this="entropy", expressions=[source_column])
+        elif self._group_by_primitive.name.startswith("quantile_"):
+            # Handle quantile primitives: quantile_25, quantile_75, etc.
+            # Extract quantile value from primitive name (e.g., "quantile_25" -> 0.25)
+            quantile_str = self._group_by_primitive.name.replace("quantile_", "")
+            try:
+                quantile_value = float(quantile_str) / 100.0  # Convert 25 -> 0.25, 75 -> 0.75
+            except ValueError:
+                # Fallback: try to get quantile from primitive attributes if available
+                quantile_value = getattr(self._group_by_primitive, "quantile", 0.5)
+            
+            # Cast boolean to integer for quantile aggregations
+            if self._is_source_feature_boolean():
+                cast_expression = Cast(
+                    this=source_column,
+                    to=Identifier(this="INTEGER", quoted=False)
+                )
+            else:
+                cast_expression = source_column
+            
+            # DuckDB quantile_cont function: quantile_cont(column, fraction)
+            # Using quantile_cont for continuous quantiles (matches pandas behavior)
+            # Pass quantile value as a numeric literal using parse_one for proper sqlglot handling
+            quantile_literal = sqlglot.parse_one(str(quantile_value))
+            return Anonymous(
+                this="quantile_cont",
+                expressions=[cast_expression, quantile_literal]
+            )
         elif self._group_by_primitive.name in numeric_only_primitives:
             # Only cast boolean to integer for numeric aggregations
             # Check if source feature is boolean before casting
