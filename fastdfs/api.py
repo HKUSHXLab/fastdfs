@@ -173,7 +173,8 @@ def compute_dfs_features(
                         f"Please ensure the values are compatible or manually convert: "
                         f"target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
                     )
-
+    # Canonicalize key types in RDB to ensure consistency (e.g., all keys as strings)
+    rdb=rdb.canonicalize_key_types()
     # Validate key consistency across all tables in the RDB
     rdb.validate_key_consistency()
 
