@@ -9,10 +9,10 @@ description = "Fast Deep Feature Synthesis for tabular data"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "AWS Shanghai AI Lab"}
+    {name = "HKU Shanghai X-Lab"}
 ]
 maintainers = [
-    {name = "AWS Shanghai AI Lab"}
+    {name = "HKU Shanghai X-Lab"}
 ]
 keywords = ["feature engineering", "deep feature synthesis", "tabular data", "automated ML"]
 classifiers = [
@@ -82,10 +82,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dglai/tab2graph"
-Repository = "https://github.com/dglai/tab2graph"
-Documentation = "https://github.com/dglai/tab2graph/blob/main/fastdfs/README.md"
-"Bug Tracker" = "https://github.com/dglai/tab2graph/issues"
+Homepage = "https://github.com/HKUSHXLab/fastdfs"
+Repository = "https://github.com/HKUSHXLab/fastdfs"
+Documentation = "https://github.com/HKUSHXLab/fastdfs/blob/main/fastdfs/README.md"
+"Bug Tracker" = "https://github.com/HKUSHXLab/fastdfs/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
