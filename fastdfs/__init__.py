@@ -12,6 +12,7 @@ logger.disable("fastdfs")
 
 # Main Table-Centric API
 from .api import (
+    create_rdb,
     load_rdb,
     compute_dfs_features,
     DFSPipeline
@@ -31,6 +32,7 @@ from .transform import (
 
 __all__ = [
     # Main API
+    "create_rdb",
     "load_rdb",
     "compute_dfs_features", 
     "DFSPipeline",
