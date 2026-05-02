@@ -5,7 +5,7 @@ This module provides the core functions for computing DFS features using
 the RDB interface.
 """
 
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List, Tuple, Union
 import pandas as pd
 from pathlib import Path
 from loguru import logger
@@ -96,8 +96,9 @@ def compute_dfs_features(
     key_mappings: Dict[str, str],
     cutoff_time_column: Optional[str] = None,
     config: Optional[DFSConfig] = None,
-    config_overrides: Optional[Dict[str, Any]] = None
-) -> pd.DataFrame:
+    config_overrides: Optional[Dict[str, Any]] = None,
+    return_metadata: bool = False,
+) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
     """
     Compute DFS features for a target dataframe using RDB context.
     
@@ -111,7 +112,8 @@ def compute_dfs_features(
         config_overrides: Dictionary of config parameters to override
         
     Returns:
-        DataFrame with original target_dataframe data plus generated features
+        DataFrame with original target_dataframe data plus generated features.
+        If return_metadata=True, returns (dataframe, metadata_dict).
         
     Example:
         >>> rdb = load_rdb("ecommerce_rdb/")
@@ -187,7 +189,8 @@ def compute_dfs_features(
         target_dataframe=target_dataframe,
         key_mappings=key_mappings,
         cutoff_time_column=cutoff_time_column,
-        config_overrides=config_overrides
+        config_overrides=config_overrides,
+        return_metadata=return_metadata,
     )
 
 

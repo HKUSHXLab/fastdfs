@@ -6,7 +6,7 @@ target dataframes and simplified RDB datasets, removing the dependency on tasks.
 """
 
 import abc
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 import pandas as pd
 import featuretools as ft
 import numpy as np
@@ -68,8 +68,9 @@ class DFSEngine:
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,
-        config_overrides: Optional[Dict[str, Any]] = None
-    ) -> pd.DataFrame:
+        config_overrides: Optional[Dict[str, Any]] = None,
+        return_metadata: bool = False,
+    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
         """
         Compute DFS features for a target dataframe using RDB context.
 
@@ -92,7 +93,12 @@ class DFSEngine:
                     setattr(effective_config, key, value)
 
         return self._compute_features_impl(
-            rdb, target_dataframe, key_mappings, cutoff_time_column, effective_config
+            rdb,
+            target_dataframe,
+            key_mappings,
+            cutoff_time_column,
+            effective_config,
+            return_metadata,
         )
 
     def _compute_features_impl(
@@ -101,12 +107,18 @@ class DFSEngine:
         target_dataframe: pd.DataFrame,
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str],
-        config: DFSConfig
-    ) -> pd.DataFrame:
+        config: DFSConfig,
+        return_metadata: bool,
+    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
         """Implementation-specific feature computation."""
 
         # Handle empty target dataframe
         if len(target_dataframe) == 0:
+            if return_metadata:
+                return target_dataframe, {
+                    "original_columns": list(target_dataframe.columns),
+                    "features": [],
+                }
             return target_dataframe
 
         original_index = target_dataframe.index
@@ -134,6 +146,11 @@ class DFSEngine:
 
         if len(features) == 0:
             logger.warning("No features generated, check your configuration or data.")
+            if return_metadata:
+                return target_dataframe, {
+                    "original_columns": list(target_dataframe.columns),
+                    "features": [],
+                }
             return target_dataframe
 
         # Phase 2: Feature computation (engine-specific logic in subclasses)
@@ -153,7 +170,37 @@ class DFSEngine:
         # Restore the original index ordering
         merged.index = original_index
 
-        return merged
+        if not return_metadata:
+            return merged
+
+        feature_depth_by_name = {}
+        for feat in features:
+            feat_name = feat.get_name()
+            if feat_name in feature_depth_by_name:
+                continue
+            try:
+                depth = int(feat.get_depth())
+            except Exception:
+                depth = None
+            feature_depth_by_name[feat_name] = depth
+
+        generated_feature_metadata = []
+        original_columns = set(target_dataframe.columns)
+        for col in merged.columns:
+            if col in original_columns:
+                continue
+            generated_feature_metadata.append(
+                {
+                    "feature_name": col,
+                    "depth": feature_depth_by_name.get(col),
+                }
+            )
+
+        metadata = {
+            "original_columns": list(target_dataframe.columns),
+            "features": generated_feature_metadata,
+        }
+        return merged, metadata
 
     def prepare_features(
         self,
