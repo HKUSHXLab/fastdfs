@@ -14,6 +14,7 @@ import numpy as np
 from pathlib import Path
 
 from fastdfs.dfs import DFSConfig, get_dfs_engine, FeaturetoolsEngine, DFS2SQLEngine
+from fastdfs.dfs.base_engine import Quantile25, Quantile75, DiscreteEntropy
 from fastdfs.dataset.rdb import RDB
 from fastdfs.api import load_rdb, compute_dfs_features, DFSPipeline
 
@@ -160,6 +161,63 @@ def compute_expected_features(rdb_dataset, target_dataframe, cutoff_time_column=
     return expected
 
 
+def compute_expected_quantile_features(rdb_dataset, target_dataframe, cutoff_time_column=None):
+    """Compute expected depth-3 quantile/mean features for engine comparison tests."""
+    expected = target_dataframe.copy()
+    expected['user_id'] = expected['user_id'].astype(str)
+    expected['item_id'] = expected['item_id'].astype(str)
+
+    user_table = rdb_dataset.get_table('user').copy()
+    user_table['user_id'] = user_table['user_id'].astype(str)
+    item_table = rdb_dataset.get_table('item').copy()
+    item_table['item_id'] = item_table['item_id'].astype(str)
+
+    interactions = rdb_dataset.get_table('interaction').copy()
+    interactions['user_id'] = interactions['user_id'].astype(str)
+    interactions['item_id'] = interactions['item_id'].astype(str)
+    interactions['timestamp'] = pd.to_datetime(interactions['timestamp'])
+
+    user_item = interactions.merge(item_table, on='item_id', how='left')
+    item_user = interactions.merge(user_table, on='user_id', how='left')
+
+    cutoff_series = (
+        pd.to_datetime(expected[cutoff_time_column])
+        if cutoff_time_column is not None
+        else None
+    )
+
+    user_means, user_q25, user_q75 = [], [], []
+    item_means, item_q25, item_q75 = [], [], []
+
+    for idx, (user_id, item_id) in enumerate(zip(expected['user_id'], expected['item_id'])):
+        cutoff_time = cutoff_series.iloc[idx] if cutoff_series is not None else None
+
+        user_rows = user_item[user_item['user_id'] == user_id]
+        if cutoff_time is not None:
+            user_rows = user_rows[user_rows['timestamp'] < cutoff_time]
+        user_values = user_rows['item_feature_0']
+        user_means.append(user_values.mean() if len(user_values) else np.nan)
+        user_q25.append(user_values.quantile(0.25) if len(user_values) else np.nan)
+        user_q75.append(user_values.quantile(0.75) if len(user_values) else np.nan)
+
+        item_rows = item_user[item_user['item_id'] == item_id]
+        if cutoff_time is not None:
+            item_rows = item_rows[item_rows['timestamp'] < cutoff_time]
+        item_values = item_rows['user_feature_0']
+        item_means.append(item_values.mean() if len(item_values) else np.nan)
+        item_q25.append(item_values.quantile(0.25) if len(item_values) else np.nan)
+        item_q75.append(item_values.quantile(0.75) if len(item_values) else np.nan)
+
+    expected['user.MEAN(interaction.item.item_feature_0)'] = user_means
+    expected['user.QUANTILE_25(interaction.item.item_feature_0)'] = user_q25
+    expected['user.QUANTILE_75(interaction.item.item_feature_0)'] = user_q75
+    expected['item.MEAN(interaction.user.user_feature_0)'] = item_means
+    expected['item.QUANTILE_25(interaction.user.user_feature_0)'] = item_q25
+    expected['item.QUANTILE_75(interaction.user.user_feature_0)'] = item_q75
+
+    return expected
+
+
 def assert_matches_expected(result_df, expected_df):
     """Assert that a result dataframe matches the deterministic expected output."""
     assert set(result_df.columns) == set(expected_df.columns), \
@@ -194,6 +252,49 @@ def compare_engine_results(ft_result, sql_result, target_columns):
         sql_values = sql_result[feature].fillna(0).values
         assert np.allclose(ft_values, sql_values, rtol=1e-5, atol=1e-8), \
             f"Feature values differ for {feature}"
+
+
+class TestCustomAggregationPrimitives:
+    """Tests for quantile_25, quantile_75, and discrete_entropy primitives."""
+
+    @pytest.fixture
+    def engine(self):
+        return get_dfs_engine("featuretools", DFSConfig(engine="featuretools"))
+
+    def test_convert_primitives_maps_custom_names(self, engine):
+        """Custom primitive names should resolve to primitive objects."""
+        primitives = engine._convert_primitives(
+            ["quantile_25", "quantile_75", "discrete_entropy", "count"]
+        )
+        assert isinstance(primitives[0], Quantile25)
+        assert isinstance(primitives[1], Quantile75)
+        assert isinstance(primitives[2], DiscreteEntropy)
+        assert primitives[3] == "count"
+
+    def test_quantile_25_primitive(self):
+        """Quantile25 should match pandas 25th percentile."""
+        quantile_fn = Quantile25().get_function()
+        assert quantile_fn(pd.Series([1.0, 2.0, 3.0, 4.0])) == pytest.approx(1.75)
+
+    def test_quantile_75_primitive(self):
+        """Quantile75 should match pandas 75th percentile."""
+        quantile_fn = Quantile75().get_function()
+        assert quantile_fn(pd.Series([1.0, 2.0, 3.0, 4.0])) == pytest.approx(3.25)
+
+    def test_discrete_entropy_uniform_distribution(self):
+        """Uniform categories should have entropy log2(n)."""
+        entropy_fn = DiscreteEntropy().get_function()
+        assert entropy_fn(pd.Series(['a', 'b', 'c', 'd'])) == pytest.approx(2.0)
+
+    def test_discrete_entropy_single_category(self):
+        """A single category should have zero entropy."""
+        entropy_fn = DiscreteEntropy().get_function()
+        assert entropy_fn(pd.Series(['a', 'a', 'a'])) == pytest.approx(0.0)
+
+    def test_discrete_entropy_all_null(self):
+        """All-null input should return NaN."""
+        entropy_fn = DiscreteEntropy().get_function()
+        assert np.isnan(entropy_fn(pd.Series([np.nan, np.nan])))
 
 
 class TestDFSConfig:
@@ -440,6 +541,80 @@ class TestEngineComparison:
 
         compare_engine_results(ft_result, sql_result, target_dataframe.columns)
         print(f"✓ Both engines with cutoff produced {len(expected.columns) - len(target_dataframe.columns)} features matching ground truth")
+
+    def test_engines_produce_same_quantile_features(self, rdb_dataset, target_dataframe, key_mappings):
+        """Test quantile_25 and quantile_75 features at depth 3 across both engines."""
+        config = DFSConfig(
+            max_depth=3,
+            agg_primitives=["mean", "quantile_25", "quantile_75"],
+            use_cutoff_time=False,
+        )
+
+        ft_engine = get_dfs_engine("featuretools", config)
+        ft_result = ft_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column=None,
+        )
+
+        sql_engine = get_dfs_engine("dfs2sql", config)
+        sql_result = sql_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column=None,
+        )
+
+        expected = compute_expected_quantile_features(rdb_dataset, target_dataframe)
+        quantile_columns = [
+            col for col in expected.columns
+            if col not in target_dataframe.columns
+        ]
+
+        assert_matches_expected(ft_result[expected.columns], expected)
+        assert_matches_expected(sql_result[expected.columns], expected)
+        compare_engine_results(ft_result, sql_result, target_dataframe.columns)
+
+        for column in quantile_columns:
+            assert column in ft_result.columns
+            assert column in sql_result.columns
+
+    def test_engines_produce_same_quantile_features_with_cutoff_time(
+        self, rdb_dataset, target_dataframe, key_mappings
+    ):
+        """Test quantile primitives respect temporal cutoff filtering."""
+        config = DFSConfig(
+            max_depth=3,
+            agg_primitives=["mean", "quantile_25", "quantile_75"],
+            use_cutoff_time=True,
+        )
+
+        ft_engine = get_dfs_engine("featuretools", config)
+        ft_result = ft_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column="interaction_time",
+        )
+
+        sql_engine = get_dfs_engine("dfs2sql", config)
+        sql_result = sql_engine.compute_features(
+            rdb=rdb_dataset,
+            target_dataframe=target_dataframe,
+            key_mappings=key_mappings,
+            cutoff_time_column="interaction_time",
+        )
+
+        expected = compute_expected_quantile_features(
+            rdb_dataset,
+            target_dataframe,
+            cutoff_time_column="interaction_time",
+        )
+
+        assert_matches_expected(ft_result[expected.columns], expected)
+        assert_matches_expected(sql_result[expected.columns], expected)
+        compare_engine_results(ft_result, sql_result, target_dataframe.columns)
 
     @pytest.mark.parametrize("engine_name", ["featuretools", "dfs2sql"])
     @pytest.mark.parametrize("use_cutoff_time", [True, False])

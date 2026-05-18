@@ -5,7 +5,7 @@ FastDFS - Fast Deep Feature Synthesis
 A standalone package for deep feature synthesis using a table-centric approach.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from loguru import logger
 logger.disable("fastdfs")
