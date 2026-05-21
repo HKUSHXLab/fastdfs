@@ -10,8 +10,31 @@ from ..api import create_rdb
 
 from . import dbinfer_bench as dbb
 
+
 class DBInferAdapter:
     """Adapter for converting DBInfer Benchmark datasets to FastDFS format."""
+
+    # Per-dataset patches keyed by DBInfer dataset name.
+    # type_hints: override inferred schema dtypes (table, col) -> RDBColumnDType
+    # float_id_columns: float IDs that must be stringified for FK consistency
+    _DATASET_PATCHES: dict[str, dict] = {
+        "diginetica": {
+            "float_id_columns": [
+                ("View", "userId"),
+                ("Purchase", "userId"),
+                ("Query", "userId"),
+            ],
+        },
+        "retailrocket": {
+            "type_hints": {
+                ("ItemAvailability", "available"): RDBColumnDType.float_t,
+                ("View", "added_to_cart"): RDBColumnDType.float_t,
+            },
+            "float_id_columns": [
+                ("Category", "parentid"),
+            ],
+        },
+    }
 
     def __init__(self, dataset_name: str, output_dir: Optional[Union[str, Path]] = None):
         """
@@ -43,29 +66,21 @@ class DBInferAdapter:
         except (ValueError, TypeError):
             return str(x)
 
-    def _apply_dataset_specific_fixes(self, tables: dict[str, pd.DataFrame]):
-        """
-        Apply dataset-specific fixes for known issues in raw data.
-        """
-        # Config: dataset_name -> list of (table_name, column_name)
-        float_fix_config = {
-            "diginetica": [
-                ("View", "userId"),
-                ("Purchase", "userId"),
-                ("Query", "userId")
-            ],
-            "retailrocket": [
-                ("Category", "parentid")
-            ]
-        }
+    def _dataset_patches(self) -> dict:
+        return self._DATASET_PATCHES.get(self.dataset_name, {})
 
-        if self.dataset_name in float_fix_config:
-            for table_name, col_name in float_fix_config[self.dataset_name]:
-                if table_name in tables:
-                    df = tables[table_name]
-                    if col_name in df.columns:
-                        df[col_name] = df[col_name].apply(self._safe_convert_float_id).astype(object)
-                        logger.info(f"Fixed {table_name}.{col_name} in {self.dataset_name}: converted float to string IDs.")
+    def _apply_dataset_specific_fixes(self, tables: dict[str, pd.DataFrame]):
+        """Apply dataset-specific fixes for known issues in raw data."""
+        patches = self._dataset_patches()
+
+        for table_name, col_name in patches.get("float_id_columns", []):
+            if table_name in tables and col_name in tables[table_name].columns:
+                df = tables[table_name]
+                df[col_name] = df[col_name].apply(self._safe_convert_float_id).astype(object)
+                logger.info(
+                    f"Fixed {table_name}.{col_name} in {self.dataset_name}: "
+                    "converted float to string IDs."
+                )
 
     def load(self) -> RDB:
         """
@@ -137,6 +152,12 @@ class DBInferAdapter:
                 elif dtype_str == "text":
                     table_hints[col_name] = RDBColumnDType.text_t
                 
+            for (override_table, override_col), override_dtype in self._dataset_patches().get(
+                "type_hints", {}
+            ).items():
+                if override_table == table_name and override_col in metadata_columns:
+                    table_hints[override_col] = override_dtype
+
             if table_hints:
                 type_hints[table_name] = table_hints
             

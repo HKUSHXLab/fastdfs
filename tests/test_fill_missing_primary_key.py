@@ -420,4 +420,53 @@ class TestFillMissingPrimaryKey:
         # Verify early return - should return original RDB
         assert result_rdb == mock_rdb
         mock_rdb.update_tables.assert_not_called()
+
+    def test_mixed_int_str_fk_pk_not_double_expanded(self):
+        """
+        int PK and str FK with the same logical ID must not create duplicate parent rows.
+
+        Mirrors retailrocket Category: PK ints, FK strings for the same category id.
+        """
+        category_df = pd.DataFrame({
+            "categoryid": [1691, 542],
+            "name": ["A", "B"],
+        })
+        view_df = pd.DataFrame({
+            "view_id": [1, 2, 3],
+            "categoryid": ["1691", "542", "999"],
+        })
+
+        tables_data = {
+            "Category": {
+                "data": category_df,
+                "columns": [
+                    RDBColumnSchema(name="categoryid", dtype=RDBColumnDType.primary_key),
+                    RDBColumnSchema(name="name", dtype=RDBColumnDType.text_t),
+                ],
+            },
+            "View": {
+                "data": view_df,
+                "columns": [
+                    RDBColumnSchema(name="view_id", dtype=RDBColumnDType.primary_key),
+                    RDBColumnSchema(
+                        name="categoryid",
+                        dtype=RDBColumnDType.foreign_key,
+                        link_to="Category.categoryid",
+                    ),
+                ],
+            },
+        }
+        relationships = [("View", "categoryid", "Category", "categoryid")]
+        mock_rdb = self.create_mock_rdb(tables_data, relationships)
+
+        self.transform(mock_rdb)
+
+        new_tables = mock_rdb.update_tables.call_args.kwargs["tables"]
+        result = new_tables["Category"]
+        assert len(result) == 3
+        canon = result["categoryid"].map(
+            lambda v: str(int(v)) if isinstance(v, (int, np.integer)) else str(v)
+        )
+        assert canon.tolist() == ["1691", "542", "999"]
+        assert canon.nunique() == 3
     

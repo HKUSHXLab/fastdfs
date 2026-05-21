@@ -15,6 +15,7 @@ from collections import defaultdict
 
 from ..dataset.meta import RDBColumnSchema, RDBColumnDType, RDBTableSchema
 from ..dataset.rdb import RDB
+from ..utils.type_utils import canonicalize_key_value
 from .base import RDBTransform
 
 
@@ -92,7 +93,7 @@ class FillMissingPrimaryKey(RDBTransform):
         - All FK columns that reference it
         
         Returns:
-            Dict mapping (table, column) to array of unique values
+            Dict mapping (table, column) to array of unique canonical key strings
         """
         unique_keys = {}
         
@@ -111,14 +112,30 @@ class FillMissingPrimaryKey(RDBTransform):
                     if fk_col in fk_table.columns:
                         key_values.append(fk_table[fk_col].values)
             
-            # Concatenate and get unique values (excluding NaN)
+            # Deduplicate by canonical key (e.g. int 1691 and str '1691' are the same ID)
             if key_values:
                 all_keys = np.concatenate(key_values)
-                # Get unique values, excluding NaN/None
-                unique_vals = pd.Series(all_keys).dropna().unique()
-                unique_keys[(pk_tbl, pk_col)] = unique_vals
+                seen: set[str] = set()
+                canonical_vals: list[str] = []
+                for raw in pd.Series(all_keys).dropna().unique():
+                    canon = canonicalize_key_value(raw)
+                    if pd.isna(canon) or canon in seen:
+                        continue
+                    seen.add(canon)
+                    canonical_vals.append(canon)
+                unique_keys[(pk_tbl, pk_col)] = np.array(canonical_vals, dtype=object)
         
         return unique_keys
+
+    @staticmethod
+    def _canonical_key_set(values) -> set[str]:
+        """Build a set of canonical key strings from an array of raw key values."""
+        keys: set[str] = set()
+        for v in values:
+            canon = canonicalize_key_value(v)
+            if not pd.isna(canon):
+                keys.add(canon)
+        return keys
     
     def _get_null_value(self, dtype: RDBColumnDType) -> object:
         """Get appropriate null value for a dtype."""
@@ -199,8 +216,8 @@ class FillMissingPrimaryKey(RDBTransform):
                 existing_pk_values = table[pk_col_name].iloc[:len(table)-num_expansion_rows].values
                 # Get all unique keys
                 all_unique_keys = unique_keys[pk_key]
-                # Find missing keys (those not in existing)
-                existing_set = set(pd.Series(existing_pk_values).dropna())
+                # Missing = in FK union but not in existing PK rows (canonical compare)
+                existing_set = self._canonical_key_set(existing_pk_values)
                 missing_keys = [k for k in all_unique_keys if k not in existing_set]
                 # Fill expanded rows with missing keys
                 if missing_keys:

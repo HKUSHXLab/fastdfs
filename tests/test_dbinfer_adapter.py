@@ -124,5 +124,74 @@ class TestDBInferAdapter(unittest.TestCase):
         # Verify save called
         mock_save.assert_called_once_with(output_dir)
 
+    @patch('fastdfs.adapter.dbinfer.dbb')
+    def test_retailrocket_binary_flags_are_float(self, mock_dbb):
+        mock_dataset = MagicMock()
+        mock_dbb.load_rdb_data.return_value = mock_dataset
+
+        col_itemid_ia = MagicMock()
+        col_itemid_ia.name = "itemid"
+        col_itemid_ia.dtype = "foreign_key"
+        col_itemid_ia.link_to = "Item.itemid"
+
+        col_available = MagicMock()
+        col_available.name = "available"
+        col_available.dtype = "float"
+
+        col_timestamp_ia = MagicMock()
+        col_timestamp_ia.name = "timestamp"
+        col_timestamp_ia.dtype = "datetime"
+
+        table_item_avail = MagicMock()
+        table_item_avail.name = "ItemAvailability"
+        table_item_avail.columns = [col_itemid_ia, col_available, col_timestamp_ia]
+        table_item_avail.time_column = "timestamp"
+
+        col_itemid_view = MagicMock()
+        col_itemid_view.name = "itemid"
+        col_itemid_view.dtype = "foreign_key"
+        col_itemid_view.link_to = "Item.itemid"
+
+        col_visitorid = MagicMock()
+        col_visitorid.name = "visitorid"
+        col_visitorid.dtype = "foreign_key"
+        col_visitorid.link_to = "Visitor.id"
+
+        col_added_to_cart = MagicMock()
+        col_added_to_cart.name = "added_to_cart"
+        col_added_to_cart.dtype = "category"
+
+        col_timestamp_view = MagicMock()
+        col_timestamp_view.name = "timestamp"
+        col_timestamp_view.dtype = "datetime"
+
+        table_view = MagicMock()
+        table_view.name = "View"
+        table_view.columns = [
+            col_itemid_view, col_visitorid, col_added_to_cart, col_timestamp_view
+        ]
+        table_view.time_column = "timestamp"
+
+        mock_dataset.metadata.tables = [table_item_avail, table_view]
+        mock_dataset.tables = {
+            "ItemAvailability": {
+                "itemid": np.array([1, 2]),
+                "available": np.array(["0", "1"], dtype=object),
+                "timestamp": np.array(["2015-01-01", "2015-01-02"]),
+            },
+            "View": {
+                "itemid": np.array([10, 11]),
+                "visitorid": np.array([100, 101]),
+                "added_to_cart": np.array([0, 1]),
+                "timestamp": np.array(["2015-01-03", "2015-01-04"]),
+            },
+        }
+
+        rdb = DBInferAdapter(dataset_name="retailrocket").load()
+        avail_meta = rdb.get_table_metadata("ItemAvailability").column_dict["available"]
+        cart_meta = rdb.get_table_metadata("View").column_dict["added_to_cart"]
+        self.assertEqual(avail_meta.dtype, RDBColumnDType.float_t)
+        self.assertEqual(cart_meta.dtype, RDBColumnDType.float_t)
+
 if __name__ == '__main__':
     unittest.main()

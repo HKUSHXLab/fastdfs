@@ -1,7 +1,44 @@
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Any, Optional
 from ..dataset.meta import RDBColumnDType
+
+
+def canonicalize_key_value(value: Any) -> Any:
+    """
+    Normalize a single PK/FK value for set membership and comparison.
+
+    Integer-like values (int, integer floats, numeric strings such as '1691')
+    map to the same canonical string so mixed-type columns are not double-counted.
+    Returns pd.NA for missing values.
+    """
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return pd.NA
+    if pd.isna(value):
+        return pd.NA
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        f = float(value)
+        if np.isnan(f):
+            return pd.NA
+        if f.is_integer():
+            return str(int(f))
+        return str(value)
+
+    s = str(value).strip()
+    if s == "" or s.lower() in ("nan", "none", "<na>"):
+        return pd.NA
+    try:
+        f = float(s)
+        if f.is_integer():
+            return str(int(f))
+    except ValueError:
+        pass
+    return s
+
 
 def safe_convert_to_string(series: pd.Series) -> pd.Series:
     """
