@@ -90,6 +90,8 @@ class DFSConfig(pydantic.BaseModel):
         ignore_entities: List of entities to ignore in feature generation
         chunk_size: Chunk size for batch processing
         n_jobs: Number of parallel jobs for computation
+        dfs2sql_concat_chunk_size: dfs2sql only — number of per-feature SQL frames to concat per
+            intermediate block when assembling the wide matrix (default 512).
     """
     agg_primitives: List[str] = [
         "max",
@@ -108,6 +110,9 @@ class DFSConfig(pydantic.BaseModel):
     ignore_entities: Optional[List[str]] = None
     chunk_size: Optional[int] = None
     n_jobs: int = 1
+    # dfs2sql: when stitching one DuckDB result per feature, concat this many skinny frames
+    # at a time before a final horizontal concat (memory vs overhead tradeoff).
+    dfs2sql_concat_chunk_size: int = 512
 
 
 class DFSEngine:

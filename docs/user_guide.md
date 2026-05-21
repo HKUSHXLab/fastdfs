@@ -471,6 +471,8 @@ config = fastdfs.DFSConfig(engine="featuretools", max_depth=2)
 config = fastdfs.DFSConfig(engine="dfs2sql", engine_path="/tmp/duckdb.db")
 ```
 
+After each feature SQL runs, dfs2sql stitches many skinny result tables. The field `dfs2sql_concat_chunk_size` (default 512) controls how many of those tables are concatenated at a time before building the final wide matrix; it is a memory versus overhead tradeoff and does not change numerical results.
+
 ### Runtime Configuration Overrides
 
 Override config parameters at runtime:
