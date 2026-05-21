@@ -16,11 +16,85 @@ from .gen_sqls import features2sql, decode_column_from_sql
 from .duckdb_database import DuckDBBuilder
 from ..dataset.meta import RDBCutoffTime, RDBColumnDType
 
-__all__ = ['DFS2SQLEngine']
+__all__ = ['DFS2SQLEngine', 'assemble_dfs2sql_feature_frames']
 
 
 import tempfile
+import time
 import uuid
+
+
+def merge_dfs2sql_feature_frames_legacy(
+    dataframes: List[pd.DataFrame],
+    target_index: str,
+) -> pd.DataFrame:
+    """Sequential left merges (original dfs2sql behavior). Used in tests for parity checks."""
+    if not dataframes:
+        raise ValueError("merge_dfs2sql_feature_frames_legacy: empty dataframes")
+    merged_df = dataframes[0]
+    for df in dataframes[1:]:
+        merged_df = pd.merge(merged_df, df, on=target_index, how="left")
+    return merged_df.sort_values(by=target_index).reset_index(drop=True)
+
+
+def assemble_dfs2sql_feature_frames(
+    dataframes: List[pd.DataFrame],
+    target_index: str,
+    canonical_index: pd.Index,
+    *,
+    concat_chunk_size: int = 512,
+) -> pd.DataFrame:
+    """Horizontally stitch per-feature SQL frames aligned on ``target_index``.
+
+    Replaces O(N) sequential ``pd.merge`` calls with index-aligned ``pd.concat``
+    (chunked along axis=1 for large N to cap intermediate width growth patterns).
+
+    Args:
+        dataframes: One DataFrame per successful DuckDB query; each includes ``target_index``
+            and one or more feature columns.
+        target_index: Name of the synthetic target key column (e.g. ``__target_index__``).
+        canonical_index: Row order for the output; typically ``target_dataframe[target_index]``.
+        concat_chunk_size: Number of skinny frames to concat per intermediate block.
+
+    Returns:
+        Wide frame sorted by ``target_index``, same contract as the legacy merge path.
+    """
+    if not canonical_index.is_unique:
+        raise ValueError(
+            f"assemble_dfs2sql_feature_frames: {target_index!r} must be unique in the target frame."
+        )
+    if not dataframes:
+        return pd.DataFrame({target_index: canonical_index.to_numpy()})
+
+    aligned: List[pd.DataFrame] = []
+    seen_cols: set[str] = set()
+    for i, df in enumerate(dataframes):
+        if target_index not in df.columns:
+            raise ValueError(
+                f"assemble_dfs2sql_feature_frames: frame {i} missing column {target_index!r}."
+            )
+        part = df.drop_duplicates(subset=[target_index], keep="first").set_index(target_index)
+        dup_names = set(part.columns) & seen_cols
+        if dup_names:
+            raise ValueError(
+                f"assemble_dfs2sql_feature_frames: duplicate feature column(s) {sorted(dup_names)!r}."
+            )
+        seen_cols.update(part.columns)
+        aligned.append(part.reindex(canonical_index))
+
+    k = max(1, int(concat_chunk_size))
+    if len(aligned) == 1:
+        wide = aligned[0]
+    else:
+        blocks: List[pd.DataFrame] = []
+        for j in range(0, len(aligned), k):
+            blocks.append(pd.concat(aligned[j : j + k], axis=1))
+        wide = pd.concat(blocks, axis=1) if len(blocks) > 1 else blocks[0]
+
+    wide.index.name = target_index
+    out = wide.reset_index()
+    return out.sort_values(by=target_index).reset_index(drop=True)
+
 
 @dfs_engine
 class DFS2SQLEngine(DFSEngine):
@@ -93,14 +167,22 @@ class DFS2SQLEngine(DFSEngine):
                 # SQLs that produce no result are skipped (e.g., CREATE TABLE)
                 pass
 
-        # Merge all feature dataframes
+        # Assemble all feature dataframes (index-aligned concat; see ``assemble_dfs2sql_feature_frames``).
         if dataframes:
-            logger.debug("Finalizing ...")
-            merged_df = dataframes[0]
-            for df in dataframes[1:]:
-                merged_df = pd.merge(merged_df, df, on=target_index, how='left')
-
-            merged_df = merged_df.sort_values(by=target_index).reset_index(drop=True)
+            canonical_index = pd.Index(target_dataframe[target_index].values, name=target_index)
+            t0 = time.perf_counter()
+            logger.info(
+                "dfs2sql: assembling {} feature frame(s) via concat (chunk_size={}) …",
+                len(dataframes),
+                config.dfs2sql_concat_chunk_size,
+            )
+            merged_df = assemble_dfs2sql_feature_frames(
+                dataframes,
+                target_index,
+                canonical_index,
+                concat_chunk_size=config.dfs2sql_concat_chunk_size,
+            )
+            logger.info("dfs2sql: assembly finished in {:.2f}s", time.perf_counter() - t0)
 
             columns_to_exclude = set(target_dataframe.columns) - {target_index}
             feature_columns = [col for col in merged_df.columns if col not in columns_to_exclude]
