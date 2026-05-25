@@ -19,11 +19,13 @@ from unittest.mock import MagicMock
 from fastdfs.transform.fill_missing_pk import FillMissingPrimaryKey
 from fastdfs.dataset.rdb import RDB
 from fastdfs.dataset.meta import (
-    RDBColumnSchema, 
-    RDBColumnDType, 
-    RDBTableSchema, 
-    RDBTableDataFormat
+    RDBColumnSchema,
+    RDBColumnDType,
+    RDBTableSchema,
+    RDBTableDataFormat,
+    RDBMeta,
 )
+from fastdfs.utils.type_utils import canonicalize_key_value
 
 
 class TestFillMissingPrimaryKey:
@@ -81,6 +83,41 @@ class TestFillMissingPrimaryKey:
         mock_rdb.get_relationships.return_value = relationships
         
         return mock_rdb
+
+    @staticmethod
+    def _canonical_key_set(values) -> set[str]:
+        keys: set[str] = set()
+        for v in values:
+            canon = canonicalize_key_value(v)
+            if not pd.isna(canon):
+                keys.add(canon)
+        return keys
+
+    def _assert_canonicalize_key_types(self, new_tables, new_metadata):
+        """Keys should become uniform strings, as in compute_dfs_features."""
+        rdb = RDB(
+            metadata=RDBMeta(name="test", tables=list(new_metadata.values())),
+            tables=new_tables,
+        )
+        canon_rdb = rdb.canonicalize_key_types()
+        canon_rdb.validate_key_consistency()
+
+        for table_name in canon_rdb.table_names:
+            metadata = canon_rdb.get_table_metadata(table_name)
+            for col_schema in metadata.columns:
+                if col_schema.dtype not in (
+                    RDBColumnDType.primary_key,
+                    RDBColumnDType.foreign_key,
+                ):
+                    continue
+                col = canon_rdb.get_table(table_name)[col_schema.name]
+                assert pd.api.types.is_object_dtype(col.dtype) or pd.api.types.is_string_dtype(
+                    col.dtype
+                ), f"{table_name}.{col_schema.name} should be string-like after canonicalize"
+                for value in col.dropna():
+                    assert isinstance(value, str), (
+                        f"{table_name}.{col_schema.name} value {value!r} should be str"
+                    )
     
     def test_basic_pk_expansion(self):
         """
@@ -136,22 +173,28 @@ class TestFillMissingPrimaryKey:
         # Verify update_tables was called
         mock_rdb.update_tables.assert_called_once()
         call_args = mock_rdb.update_tables.call_args
-        new_tables = call_args.kwargs['tables']  # First positional argument
+        new_tables = call_args.kwargs['tables']
+        new_metadata = call_args.kwargs['metadata']
         
         # Check Product table was expanded
         expanded_product = new_tables['Product']
         assert len(expanded_product) == 5, "Product table should have 5 rows"
-        assert set(expanded_product['product_id']) == {1, 2, 3, 4, 5}, "Should contain all referenced product_ids"
+        assert self._canonical_key_set(expanded_product['product_id']) == {
+            "1", "2", "3", "4", "5"
+        }, "Should contain all referenced product_ids"
         
         # Check original rows are preserved
-        original_products = expanded_product[expanded_product['product_id'].isin([1, 2, 3])]
+        canon_ids = expanded_product['product_id'].map(canonicalize_key_value)
+        original_products = expanded_product[canon_ids.isin(["1", "2", "3"])]
         assert len(original_products) == 3
         assert original_products['name'].tolist() == ['A', 'B', 'C']
         
         # Check new rows have NaN for non-PK columns
-        new_products = expanded_product[expanded_product['product_id'].isin([4, 5])]
+        new_products = expanded_product[canon_ids.isin(["4", "5"])]
         assert len(new_products) == 2
         assert new_products['name'].isna().all() or (new_products['name'] == '').all()
+
+        self._assert_canonicalize_key_types(new_tables, new_metadata)
     
     def test_no_expansion_when_complete(self):
         """
@@ -274,11 +317,16 @@ class TestFillMissingPrimaryKey:
         # Get result
         call_args = mock_rdb.update_tables.call_args
         new_tables = call_args.kwargs['tables']
+        new_metadata = call_args.kwargs['metadata']
         
         # Check Product expanded to include all referenced values
         result_product = new_tables['Product']
         assert len(result_product) == 5, "Product should have 5 rows"
-        assert set(result_product['product_id']) == {1, 2, 3, 4, 5}, "Should contain union of all FK values"
+        assert self._canonical_key_set(result_product['product_id']) == {
+            "1", "2", "3", "4", "5"
+        }, "Should contain union of all FK values"
+
+        self._assert_canonicalize_key_types(new_tables, new_metadata)
     
     def test_empty_pk_table(self):
         """
@@ -328,11 +376,14 @@ class TestFillMissingPrimaryKey:
         # Get result
         call_args = mock_rdb.update_tables.call_args
         new_tables = call_args.kwargs['tables']
+        new_metadata = call_args.kwargs['metadata']
         
         # Check Product was populated
         result_product = new_tables['Product']
         assert len(result_product) == 3, "Product should have 3 rows"
-        assert set(result_product['product_id']) == {1, 2, 3}
+        assert self._canonical_key_set(result_product['product_id']) == {"1", "2", "3"}
+
+        self._assert_canonicalize_key_types(new_tables, new_metadata)
     
     def test_empty_fk_table(self):
         """
