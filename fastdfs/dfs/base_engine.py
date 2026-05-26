@@ -80,7 +80,9 @@ class DFSConfig(pydantic.BaseModel):
     including aggregation primitives, depth limits, and engine selection.
 
     Attributes:
-        agg_primitives: List of aggregation primitive names to use
+        agg_primitives: List of aggregation primitive names to use. See
+            ``docs/aggregation_primitives.md`` in the package repo for supported
+            primitives per engine (dfs2sql vs featuretools).
         max_depth: Maximum depth for feature generation
         use_cutoff_time: Whether to use temporal cutoff times
         engine: Name of the DFS engine to use for computation

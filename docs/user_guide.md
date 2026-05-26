@@ -433,6 +433,8 @@ features = pipeline.compute_features(
 
 ### DFS Configuration
 
+For a full list of supported aggregation primitives (defaults, dfs2sql vs featuretools, custom quantiles and entropy), see **[Aggregation Primitives](aggregation_primitives.md)**.
+
 Customize feature generation with `DFSConfig`:
 
 ```python
