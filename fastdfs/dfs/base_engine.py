@@ -17,7 +17,31 @@ from woodwork.column_schema import ColumnSchema
 from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType, RDBColumnSchema
 
-__all__ = ['DFSConfig', 'DFSEngine', 'get_dfs_engine', 'dfs_engine', 'Quantile25', 'Quantile75', 'DiscreteEntropy']
+__all__ = [
+    'DFSConfig',
+    'DFSEngine',
+    'dfs_feature_column_name',
+    'get_dfs_engine',
+    'dfs_engine',
+    'Quantile25',
+    'Quantile75',
+    'DiscreteEntropy',
+]
+
+
+def dfs_feature_column_name(feature: ft.FeatureBase) -> str:
+    """Stable column name for a DFS feature, including Featuretools relationship depth.
+
+    Depth is ``FeatureBase.get_depth()`` (0 = identity on the target row, 1 = one hop, …).
+    Format: ``d{depth}__`` + ``feature.get_name()`` so the original Featuretools name stays
+    parseable after the prefix.
+
+    Examples
+    --------
+    - ``d0__intime`` — target-frame identity / time column feature at depth 0
+    - ``d2__patients.MEAN(admissions.MEAN(icustays.los_icu))`` — nested aggregation at depth 2
+    """
+    return f"d{int(feature.get_depth())}__{feature.get_name()}"
 
 
 # Custom quantile aggregation primitives
@@ -94,6 +118,9 @@ class DFSConfig(pydantic.BaseModel):
         n_jobs: Number of parallel jobs for computation
         dfs2sql_concat_chunk_size: dfs2sql only — number of per-feature SQL frames to concat per
             intermediate block when assembling the wide matrix (default 512).
+        include_cutoff_time: When True, include RDB rows whose time equals the task cutoff
+            (``<=`` in dfs2sql; featuretools ``include_cutoff_time=True``). Default False keeps
+            strict ``<`` for other datasets.
     """
     agg_primitives: List[str] = [
         "max",
@@ -115,6 +142,7 @@ class DFSConfig(pydantic.BaseModel):
     # dfs2sql: when stitching one DuckDB result per feature, concat this many skinny frames
     # at a time before a final horizontal concat (memory vs overhead tradeoff).
     dfs2sql_concat_chunk_size: int = 512
+    include_cutoff_time: bool = False
 
 
 class DFSEngine:
@@ -201,6 +229,15 @@ class DFSEngine:
         feature_matrix = self.compute_feature_matrix(
             rdb, target_df_for_engine, key_mappings, cutoff_time_column, features, config
         )
+
+        renames = {}
+        for f in features:
+            old = f.get_name()
+            new = dfs_feature_column_name(f)
+            if old != new and old in feature_matrix.columns:
+                renames[old] = new
+        if renames:
+            feature_matrix = feature_matrix.rename(columns=renames, copy=False)
 
         if target_index not in feature_matrix.columns:
             logger.error("Feature matrix is missing the target index column '__target_index__'.")

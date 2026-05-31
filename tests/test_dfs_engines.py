@@ -134,8 +134,8 @@ def compute_expected_features(rdb_dataset, target_dataframe, cutoff_time_column=
     item_table['item_id'] = item_table['item_id'].astype(str)
     item_table = item_table.set_index('item_id')
 
-    expected['user.user_feature_0'] = expected['user_id'].map(user_table['user_feature_0'])
-    expected['item.item_feature_0'] = expected['item_id'].map(item_table['item_feature_0'])
+    expected['d1__user.user_feature_0'] = expected['user_id'].map(user_table['user_feature_0'])
+    expected['d1__item.item_feature_0'] = expected['item_id'].map(item_table['item_feature_0'])
 
     interactions = rdb_dataset.get_table('interaction').copy()
     interactions['user_id'] = interactions['user_id'].astype(str)
@@ -150,13 +150,13 @@ def compute_expected_features(rdb_dataset, target_dataframe, cutoff_time_column=
             eligible = interactions[interactions['timestamp'] < cutoff_time]
             user_counts.append(int((eligible['user_id'] == user_id).sum()))
             item_counts.append(int((eligible['item_id'] == item_id).sum()))
-        expected['user.COUNT(interaction)'] = user_counts
-        expected['item.COUNT(interaction)'] = item_counts
+        expected['d2__user.COUNT(interaction)'] = user_counts
+        expected['d2__item.COUNT(interaction)'] = item_counts
     else:
         user_counts = interactions.groupby('user_id').size()
         item_counts = interactions.groupby('item_id').size()
-        expected['user.COUNT(interaction)'] = expected['user_id'].map(user_counts).fillna(0).astype(int)
-        expected['item.COUNT(interaction)'] = expected['item_id'].map(item_counts).fillna(0).astype(int)
+        expected['d2__user.COUNT(interaction)'] = expected['user_id'].map(user_counts).fillna(0).astype(int)
+        expected['d2__item.COUNT(interaction)'] = expected['item_id'].map(item_counts).fillna(0).astype(int)
 
     return expected
 
@@ -208,12 +208,12 @@ def compute_expected_quantile_features(rdb_dataset, target_dataframe, cutoff_tim
         item_q25.append(item_values.quantile(0.25) if len(item_values) else np.nan)
         item_q75.append(item_values.quantile(0.75) if len(item_values) else np.nan)
 
-    expected['user.MEAN(interaction.item.item_feature_0)'] = user_means
-    expected['user.QUANTILE_25(interaction.item.item_feature_0)'] = user_q25
-    expected['user.QUANTILE_75(interaction.item.item_feature_0)'] = user_q75
-    expected['item.MEAN(interaction.user.user_feature_0)'] = item_means
-    expected['item.QUANTILE_25(interaction.user.user_feature_0)'] = item_q25
-    expected['item.QUANTILE_75(interaction.user.user_feature_0)'] = item_q75
+    expected['d3__user.MEAN(interaction.item.item_feature_0)'] = user_means
+    expected['d3__user.QUANTILE_25(interaction.item.item_feature_0)'] = user_q25
+    expected['d3__user.QUANTILE_75(interaction.item.item_feature_0)'] = user_q75
+    expected['d3__item.MEAN(interaction.user.user_feature_0)'] = item_means
+    expected['d3__item.QUANTILE_25(interaction.user.user_feature_0)'] = item_q25
+    expected['d3__item.QUANTILE_75(interaction.user.user_feature_0)'] = item_q75
 
     return expected
 
@@ -378,10 +378,10 @@ class TestFeaturetoolsEngine:
         assert "interaction_time" in result_df.columns
 
         # Check the following features are in the result
-        assert "user.user_feature_0" in result_df.columns
-        assert "item.item_feature_0" in result_df.columns
-        assert "user.COUNT(interaction)" in result_df.columns
-        assert "item.COUNT(interaction)" in result_df.columns
+        assert "d1__user.user_feature_0" in result_df.columns
+        assert "d1__item.item_feature_0" in result_df.columns
+        assert "d2__user.COUNT(interaction)" in result_df.columns
+        assert "d2__item.COUNT(interaction)" in result_df.columns
 
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)
@@ -413,10 +413,10 @@ class TestFeaturetoolsEngine:
         assert "interaction_time" in result_df.columns
 
         # Check the following features are in the result
-        assert "user.user_feature_0" in result_df.columns
-        assert "item.item_feature_0" in result_df.columns
-        assert "user.COUNT(interaction)" in result_df.columns
-        assert "item.COUNT(interaction)" in result_df.columns
+        assert "d1__user.user_feature_0" in result_df.columns
+        assert "d1__item.item_feature_0" in result_df.columns
+        assert "d2__user.COUNT(interaction)" in result_df.columns
+        assert "d2__item.COUNT(interaction)" in result_df.columns
 
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)
@@ -458,10 +458,10 @@ class TestDFS2SQLEngine:
         assert "interaction_time" in result_df.columns
 
         # Check the following features are in the result
-        assert "user.user_feature_0" in result_df.columns
-        assert "item.item_feature_0" in result_df.columns
-        assert "user.COUNT(interaction)" in result_df.columns
-        assert "item.COUNT(interaction)" in result_df.columns
+        assert "d1__user.user_feature_0" in result_df.columns
+        assert "d1__item.item_feature_0" in result_df.columns
+        assert "d2__user.COUNT(interaction)" in result_df.columns
+        assert "d2__item.COUNT(interaction)" in result_df.columns
 
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)

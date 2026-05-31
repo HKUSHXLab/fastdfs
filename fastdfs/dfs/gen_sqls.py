@@ -11,6 +11,7 @@ from sqlglot.expressions import (
     select,
     EQ,
     LT,
+    LTE,
     Drop,
     Coalesce,
     Select,
@@ -67,6 +68,7 @@ class FeatureBlock:
         is_first: Optional[bool] = False,
         index_col: Optional[str] = None,
         column_type_map: Optional[Dict[Tuple[str, str], str]] = None,
+        include_cutoff_time: bool = False,
     ):
         """
         1. initialize the info from ft.Feature
@@ -83,6 +85,7 @@ class FeatureBlock:
         self._generated_column_name = generated_column_name
         self._skip_backward_relationships = skip_backward_relationships
         self._index_col = index_col
+        self._include_cutoff_time = include_cutoff_time
         self._use_cutoff_time = False
         self._column_type_map = column_type_map or {}
         self._build()
@@ -120,6 +123,7 @@ class FeatureBlock:
                 skip_backward_relationships=child_skip_backward_relationships,
                 is_first=False,
                 column_type_map=self._column_type_map,
+                include_cutoff_time=self._include_cutoff_time,
             )
         """
             3.get alias table name after building child featureblock
@@ -610,8 +614,9 @@ class FeatureBlockWithCutoffTime(FeatureBlock):
         )
         # 2. Temporal constraint
         if target_table_name in time_col_mapping:
+            time_cmp = LTE if self._include_cutoff_time else LT
             condition = condition.and_(
-                LT(
+                time_cmp(
                     this=Column(
                         this=str_to_quoted_identifier(
                             time_col_mapping[target_table_name]
@@ -721,6 +726,7 @@ def features2sql(
     cutoff_time_col_name: str,
     time_col_mapping: Dict[str, str],
     column_type_map: Optional[Dict[Tuple[str, str], str]] = None,
+    include_cutoff_time: bool = False,
 ) -> List[Select]:
     if has_cutoff_time:
         target_table = features[0].dataframe_name
@@ -738,6 +744,7 @@ def features2sql(
                 is_first=True,
                 index_col=index_name,
                 column_type_map=column_type_map,
+                include_cutoff_time=include_cutoff_time,
             )
             if feature_block.has_skip_backward_relationships():
                 logger.warning(

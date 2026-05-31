@@ -147,6 +147,7 @@ class DFS2SQLEngine(DFSEngine):
             cutoff_time_col_name=cutoff_time_col_name,
             time_col_mapping=time_columns,
             column_type_map=column_type_map,
+            include_cutoff_time=config.include_cutoff_time,
         )
 
         # Execute SQLs and merge results (reuse existing logic)
