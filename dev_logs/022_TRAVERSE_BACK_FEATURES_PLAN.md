@@ -1,5 +1,14 @@
 # 022 — Traverse-Back Feature Generation (Design)
 
+> **Implementation status (current):** The generator implements the **general
+> rule** of section 10 — a bounded, non-degenerate walk over the FK multigraph —
+> not just the homogeneous special case of sections 3–4. It covers both
+> `A → B → A → B` (homogeneous graph, `B` has ≥2 FKs into `A`) and
+> `A → B → C → B → A` (bipartite / collaborative-filtering). Controlled by
+> `DFSConfig.traverse_back` (on/off) and `DFSConfig.max_revisits` (rounds), and
+> bounded by `max_depth`. Sections 1–9 describe the original special-case design
+> and remain valid as the special case; section 10 is the implemented general rule.
+
 ## 1. Problem
 
 `featuretools.dfs()` refuses to generate features whose synthesis path revisits a
@@ -308,6 +317,124 @@ against the unfixed engine, then GREEN after the fix):
    engines agree on all common traverse-back features; one hand-computed 2-hop
    mean value is asserted exactly.
 6. **`max_features`** (`TestTraverseBackMaxFeatures`): the global cap is respected.
-7. **Regression:** full existing suite (125 tests) stays green (145 total with the
+ 7. **Regression:** full existing suite (125 tests) stays green (145 total with the
    new tests).
 ```
+
+## 10. General theory of traverse-back feature generation (addendum)
+
+The implemented fix is a *special case* of a more general rule. This section
+records the general theory (empirically verified) for future generalization.
+
+### 10.1 Model
+
+The schema is a directed multigraph `G = (T, R)`: nodes are tables, edges are FK
+relationships `r: child -(fk)-> parent`. Each hop traverses an edge in one of two
+directions:
+
+- **up** (`child -> parent`, many->one): a `DirectFeature` (join/lookup). One child
+  row maps to exactly one parent row.
+- **down** (`parent -> child`, one->many): an `AggregationFeature`. Many child rows
+  collapse to one parent value.
+
+A **feature path** is a target-rooted walk `P = (e1,d1)...(ek,dk)` with
+`ei in R`, `di in {up,down}`, connected (consecutive edges share a table).
+`get_depth()` equals the hop count `k`.
+
+### 10.2 Exactly what featuretools enumerates
+
+The limiter is `_run_dfs`: `if b_dataframe_id in all_features: continue`, keyed on
+**table name in the global visited set**. The secondary guard
+`_feature_in_relationship_path` only blocks aggregating an on-path FK/PK *identity*
+column.
+
+> Featuretools enumerates a path iff the walk does not re-enter a table already
+> expanded on the active branch — i.e. essentially the **table-simple** paths.
+> Verified: `A->B->C->B` is produced (innermost agg on B), but `A->B->C->B->A`
+> is NOT (re-entering A), at any max_depth (tested up to 8).
+
+Every path that genuinely revisits a table is missed. That is the entire gap.
+
+### 10.3 Degeneracy lemma (when a revisit carries no information)
+
+> A consecutive pair `(e, down)·(e, up)` or `(e, up)·(e, down)` through the **same**
+> edge `e` is an identity transform: it returns to the same rows and the
+> surrounding aggregation collapses to a no-op.
+
+*Proof sketch:* an FK is many->one. Descending `down` edge `e` from parent `p`
+yields children `{c : c.fk = p}`; climbing back `up` the same `e` maps every such
+`c` to its unique parent `p`. The round trip recovers the original singleton group,
+so re-aggregation reproduces the inner value. Verified numerically:
+`A.MEAN(B.A.MEAN(B.bv)) == A.MEAN(B.bv)` exactly.
+
+**Refinement (important — the implemented rule).** "Same edge reversed" is
+*necessary but not sufficient* for degeneracy. The bipartite CF feature
+`users.MEAN(inter.items.MEAN(inter.users.uval))` traverses the `inter<->items` edge
+in both directions consecutively yet is **non-degenerate and row-varying**, because
+the reversal is separated (in row scope) by aggregations over a *different* edge.
+The precise degenerate pattern is narrower:
+
+> **Degenerate iff** an `AggregationFeature` over edge `e` (parent ← child, *down*)
+> has, as its **immediate** base, a `DirectFeature` up the **same** edge `e`
+> (child → parent) over the **same** child rows. That specific composition
+> `down(e) ∘ up(e)` is the identity.
+
+The implementation prunes exactly this pattern (an agg-down whose direct base uses
+the same relationship object), not all same-edge reversals.
+
+### 10.4 The general validity rule
+
+> A revisiting path produces new information iff it never contains the degenerate
+> composition of §10.3 — i.e. no `AggregationFeature(down e)` directly wraps a
+> `DirectFeature(up e)` on the same edge.
+
+Two ways this is satisfied when revisiting table `A` via a relation `B`:
+
+1. **Same `B` with >= 2 FKs into `A`** (homogeneous graph): descend `A -(fk_i)-> B`,
+   climb `B -(fk_j)-> A`, `i != j`. Implemented.
+2. **Revisit through a different intermediate table `C`** (`A->B->C->B->A`): the two
+   `A<->B` hops are separated by `C`. The collaborative-filtering shape
+   "neighbors-of-neighbors through shared `C`", e.g.
+   `users.MEAN(inter.items.MEAN(inter.users.uval))`. Implemented.
+
+### 10.5 General generation procedure (implemented)
+
+Walk `G` from the target allowing revisits, subject to:
+
+1. **Depth budget**: path length <= `max_depth` (via featuretools `get_depth`).
+2. **Revisit budget**: at most `2 * max_revisits` table re-entries along a path (one
+   conceptual round re-enters two tables, so `max_revisits=1` allows `A->B->A->B`).
+3. **Degeneracy prune (§10.3)**: drop any agg-down whose immediate direct base uses
+   the same edge.
+4. **Type validity**: a `down` (aggregation) hop must wrap a feature whose output
+   column-schema matches the primitive's input type; `up` (direct) hops are
+   unconstrained. Innermost element is an IdentityFeature on a non-key column (or the
+   entity index for COUNT, only at the innermost down hop).
+5. **Key-aggregation exclusion**: never aggregate an FK/PK column as a value.
+6. **Dedup & cap**: emit only paths that revisit >= 1 table (plain table-simple
+   features are left to featuretools); dedup by `get_name()` against the features
+   featuretools already produced; honor `max_features`.
+
+Implemented as a bounded DFS over target-rooted walks, materializing each walk
+inside-out into `DirectFeature`/`AggregationFeature` objects.
+
+### 10.6 Relationship to the original special case
+
+Sections 3–4 described an earlier implementation restricted to same-`B`
+`A -(fk_i)-> B -(fk_j)-> A` revisits with one round per layer. The current code
+generalizes that to the full §10.5 procedure; the special case is now simply the
+subset of walks where the revisited relation table is the same `B`. All original
+special-case tests continue to pass unchanged.
+
+### 10.7 Cost and the `max_revisits` lever
+
+The walk count grows quickly in `max_depth` and FK fan-out (a 3-FK hyper-edge or a
+dense bipartite schema multiplies fast). Two levers bound it:
+
+- `traverse_back: bool` — off-switch (default `True`).
+- `max_revisits: int` (default `1`) — number of conceptual traverse-back rounds; a
+  second round (depth 6 on a graph) requires `max_revisits >= 2`. Raising `max_depth`
+  alone does **not** add deeper rounds.
+
+Possible future levers (not implemented): an allowlist of revisit-eligible relation
+tables, or an information-gain/feature-importance filter.

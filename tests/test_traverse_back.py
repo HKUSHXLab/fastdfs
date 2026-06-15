@@ -207,10 +207,17 @@ class TestTraverseBackDepthGate:
         over = [f.get_name() for f in feats if f.get_depth() > max_depth]
         assert over == [], f"features exceed max_depth={max_depth}: {over[:3]}"
 
-    def test_second_round_only_at_depth_6(self, graph_rdb, graph_target):
-        """A second traverse-back round (depth 6) must not appear at depth 4/5."""
-        def max_observed_depth(max_depth):
-            config = DFSConfig(engine="featuretools", max_depth=max_depth)
+    def test_rounds_controlled_by_max_revisits(self, graph_rdb, graph_target):
+        """Traverse-back rounds are gated by max_revisits, not by max_depth alone.
+
+        One round (A->B->A->B, depth 4) needs max_revisits>=1; a second round
+        (depth 6) needs both max_depth>=6 AND max_revisits>=2. Increasing max_depth
+        without increasing max_revisits must not silently add deeper rounds.
+        """
+        def max_observed_depth(max_depth, max_revisits):
+            config = DFSConfig(
+                engine="featuretools", max_depth=max_depth, max_revisits=max_revisits
+            )
             engine = get_dfs_engine("featuretools", config)
             target = graph_target.copy()
             target["__target_index__"] = np.arange(len(target))
@@ -219,9 +226,13 @@ class TestTraverseBackDepthGate:
             )
             return max(f.get_depth() for f in feats)
 
-        assert max_observed_depth(4) == 4
-        assert max_observed_depth(5) == 4  # round 2 needs depth 6
-        assert max_observed_depth(6) == 6
+        # One round: depth 4 reached, and raising max_depth alone does not deepen.
+        assert max_observed_depth(4, 1) == 4
+        assert max_observed_depth(5, 1) == 4
+        assert max_observed_depth(6, 1) == 4  # still one round despite the budget
+        # Two rounds require max_revisits>=2; depth then follows max_depth.
+        assert max_observed_depth(6, 2) == 6
+        assert max_observed_depth(5, 2) == 5  # depth budget caps the second round
 
 
 # --------------------------------------------------------------------------- #
@@ -795,3 +806,167 @@ class TestTraverseBackCutoffTime:
                 differs = True
                 break
         assert differs, "cutoff time had no effect on any traverse-back feature"
+
+
+# --------------------------------------------------------------------------- #
+# General rule: bipartite A -> B -> C -> B -> A (intermediate-table revisit)
+# --------------------------------------------------------------------------- #
+
+class TestTraverseBackBipartite:
+    """The collaborative-filtering shape A -> B -> C -> B -> A, where B has one FK
+    to A and one to C. Featuretools cannot generate it (it revisits A); the general
+    traverse-back walk can."""
+
+    @pytest.fixture
+    def cf_rdb(self):
+        users = pd.DataFrame({"user_id": ["u0", "u1", "u2", "u3"], "uval": [1.0, 2.0, 3.0, 4.0]})
+        items = pd.DataFrame({"item_id": ["i0", "i1", "i2"], "ival": [10.0, 20.0, 30.0]})
+        inter = pd.DataFrame({
+            "inter_id": ["x0", "x1", "x2", "x3", "x4", "x5"],
+            "user_id": ["u0", "u0", "u1", "u2", "u3", "u1"],
+            "item_id": ["i0", "i1", "i1", "i2", "i2", "i0"],
+            "rating": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        })
+        return create_rdb(
+            tables={"users": users, "items": items, "inter": inter},
+            name="cf_rdb",
+            primary_keys={"users": "user_id", "items": "item_id", "inter": "inter_id"},
+            foreign_keys=[
+                ("inter", "user_id", "users", "user_id"),
+                ("inter", "item_id", "items", "item_id"),
+            ],
+        )
+
+    @pytest.fixture
+    def cf_target(self):
+        return pd.DataFrame({"user_id": ["u0", "u1", "u2", "u3"]})
+
+    @pytest.mark.parametrize("engine", ["featuretools", "dfs2sql"])
+    def test_cf_feature_generated(self, cf_rdb, cf_target, engine):
+        # The CF feature target->users->inter->items->inter->users is a 5-hop path,
+        # so it needs max_depth >= 5.
+        result = compute_dfs_features(
+            rdb=cf_rdb, target_dataframe=cf_target.copy(),
+            key_mappings={"user_id": "users.user_id"},
+            config=DFSConfig(engine=engine, max_depth=5, max_revisits=1),
+        )
+        cols = [c for c in result.columns if c != "user_id"]
+        # A->B->C->B->A ending in a users column: inter appears twice, users appears
+        # again inside (not just as the outer prefix), and items is on the path.
+        cf = [
+            c for c in cols
+            if c.count("inter") >= 2 and "items" in c and "inter.users." in c
+        ]
+        assert len(cf) > 0, "expected A->B->C->B->A collaborative-filtering features"
+
+    @pytest.mark.parametrize("engine", ["featuretools", "dfs2sql"])
+    def test_cf_value_matches_brute_force(self, cf_rdb, cf_target, engine):
+        """Hand-checked CF value: avg uval of users sharing my items."""
+        inter = pd.DataFrame({
+            "user_id": ["u0", "u0", "u1", "u2", "u3", "u1"],
+            "item_id": ["i0", "i1", "i1", "i2", "i2", "i0"],
+        })
+        uval = {"u0": 1.0, "u1": 2.0, "u2": 3.0, "u3": 4.0}
+
+        def item_mean_uval(item):
+            us = inter[inter.item_id == item]["user_id"]
+            return float(np.mean([uval[u] for u in us]))
+
+        def feature(user):
+            its = inter[inter.user_id == user]["item_id"]
+            vals = [item_mean_uval(it) for it in its]
+            return float(np.mean(vals)) if vals else np.nan
+
+        col = "users.MEAN(inter.items.MEAN(inter.users.uval))"
+        result = compute_dfs_features(
+            rdb=cf_rdb, target_dataframe=cf_target.copy(),
+            key_mappings={"user_id": "users.user_id"},
+            config=DFSConfig(engine=engine, max_depth=5, max_revisits=1),
+        )
+        assert col in result.columns, f"missing CF feature: {col}"
+        expected = [feature(u) for u in cf_target["user_id"]]
+        got = pd.to_numeric(result[col].reset_index(drop=True), errors="coerce").tolist()
+        assert np.allclose(got, expected, atol=1e-6, equal_nan=True), (
+            f"{engine}\n  expected={expected}\n  got     ={got}"
+        )
+
+    def test_disabled_when_traverse_back_false(self, cf_rdb, cf_target):
+        # Note: featuretools natively generates A->B->C->B features
+        # (e.g. users.MEAN(inter.items.MEAN(inter.rating))) even without our
+        # generator. Disabling traverse_back must only remove the features that
+        # revisit A (i.e. the A->B->C->B->A shape ending in a users column).
+        result = compute_dfs_features(
+            rdb=cf_rdb, target_dataframe=cf_target.copy(),
+            key_mappings={"user_id": "users.user_id"},
+            config=DFSConfig(engine="featuretools", max_depth=5, traverse_back=False),
+        )
+        cols = [c for c in result.columns if c != "user_id"]
+        # No feature should climb back into users (inter.users.<col>) at depth.
+        assert not any("inter.users." in c for c in cols)
+
+
+# --------------------------------------------------------------------------- #
+# max_revisits lever
+# --------------------------------------------------------------------------- #
+
+class TestTraverseBackMaxRevisits:
+
+    def test_default_is_one(self):
+        assert DFSConfig().max_revisits == 1
+
+    def test_zero_revisits_disables(self, graph_rdb, graph_target):
+        result = compute_dfs_features(
+            rdb=graph_rdb, target_dataframe=graph_target.copy(),
+            key_mappings=GRAPH_KEYS,
+            config=DFSConfig(engine="featuretools", max_depth=6, max_revisits=0),
+        )
+        tb = [
+            c for c in result.columns
+            if c not in ("src_id", "dst_id") and c.count("edges") >= 2
+        ]
+        assert tb == []
+
+    def test_more_revisits_adds_deeper_features(self, graph_rdb, graph_target):
+        def count(max_revisits):
+            result = compute_dfs_features(
+                rdb=graph_rdb, target_dataframe=graph_target.copy(),
+                key_mappings=GRAPH_KEYS,
+                config=DFSConfig(
+                    engine="featuretools", max_depth=6, max_revisits=max_revisits
+                ),
+            )
+            return len([c for c in result.columns if c not in ("src_id", "dst_id")])
+
+        assert count(2) > count(1)
+
+
+# --------------------------------------------------------------------------- #
+# Degeneracy: single-FK chains never produce a same-edge round trip
+# --------------------------------------------------------------------------- #
+
+class TestTraverseBackDegeneracy:
+
+    def test_single_fk_chain_no_degenerate_feature(self):
+        """A <- B with one FK: the only 'revisit' is the degenerate same-edge round
+        trip A.<agg>(B.A.<agg>(B.x)), which must never be emitted."""
+        A = pd.DataFrame({"a_id": ["a0", "a1", "a2"], "av": [1.0, 2.0, 3.0]})
+        B = pd.DataFrame({
+            "b_id": ["b0", "b1", "b2", "b3"],
+            "a_fk": ["a0", "a0", "a1", "a2"],
+            "bv": [10.0, 20.0, 30.0, 40.0],
+        })
+        rdb = create_rdb(
+            tables={"A": A, "B": B}, name="single",
+            primary_keys={"A": "a_id", "B": "b_id"},
+            foreign_keys=[("B", "a_fk", "A", "a_id")],
+        )
+        target = pd.DataFrame({"a_fk": ["a0", "a1", "a2"]})
+        result = compute_dfs_features(
+            rdb=rdb, target_dataframe=target.copy(),
+            key_mappings={"a_fk": "A.a_id"},
+            config=DFSConfig(engine="featuretools", max_depth=6, max_revisits=2),
+        )
+        cols = [c for c in result.columns if c != "a_fk"]
+        # A degenerate feature would nest two aggregations over B, e.g. "(B." twice.
+        degenerate = [c for c in cols if c.count("(B.") >= 2 or c.count("(B)") + c.count("(B.") >= 2]
+        assert degenerate == [], f"degenerate same-edge round trip leaked: {degenerate}"

@@ -110,13 +110,20 @@ class DFSConfig(pydantic.BaseModel):
     ignore_entities: Optional[List[str]] = None
     chunk_size: Optional[int] = None
     n_jobs: int = 1
-    # Generate "traverse-back" features that featuretools' DFS skips. These arise
-    # when an entity table A is connected to a relation table B that has >=2 foreign
-    # keys into A (e.g. a graph: nodes <- edges(src_id, dst_id)). The path
-    # A -> B -> A -> B revisits A through a different FK and collects different rows,
-    # producing valid multi-hop (neighborhood) aggregations. Set False to disable
-    # (recommended on wide multi-FK schemas where the feature count can explode).
+    # Generate "traverse-back" features that featuretools' DFS skips. Featuretools
+    # refuses to revisit a table already on the synthesis path, so it misses features
+    # whose path returns to an earlier table through a different relationship edge
+    # (e.g. a graph nodes <- edges(src_id, dst_id): nodes -> edges -> nodes -> edges,
+    # or a bipartite users -> interactions -> items -> interactions -> users). These
+    # revisiting paths collect genuinely different rows and yield valid multi-hop /
+    # neighborhood aggregations. Set False to disable (recommended on dense or wide
+    # multi-FK schemas where the feature count can explode).
     traverse_back: bool = True
+    # Maximum number of table revisits allowed along a single traverse-back feature
+    # path. 1 permits one return to an already-visited table (e.g. A->B->A->B or
+    # A->B->C->B->A); higher values permit deeper neighborhood walks at the cost of
+    # combinatorial blow-up. Bounded in practice by max_depth as well.
+    max_revisits: int = 1
     # dfs2sql: when stitching one DuckDB result per feature, concat this many skinny frames
     # at a time before a final horizontal concat (memory vs overhead tradeoff).
     dfs2sql_concat_chunk_size: int = 512
@@ -459,89 +466,115 @@ class DFSEngine:
         """
         Generate "traverse-back" features that featuretools' DFS skips.
 
-        Featuretools' DFS refuses to revisit a dataframe already on the current
-        synthesis path (its guard keys on table name, not on the relationship
-        taken). So when an entity table ``A`` is connected to a relation table
-        ``B`` that has two or more foreign keys into ``A`` (canonically a graph:
-        ``A = nodes``, ``B = edges`` with ``edges.src_id -> nodes`` and
-        ``edges.dst_id -> nodes``), the path::
+        Featuretools enumerates only *table-simple* synthesis paths: its
+        ``_run_dfs`` guard (``if dataframe in all_features: continue``) refuses to
+        re-enter a table already expanded on the active branch. It therefore misses
+        every feature whose path revisits an earlier table, even when the revisit
+        collects genuinely different rows. Two important shapes are missed:
 
-            A -> B -> A -> B
+          * homogeneous graph -- ``A -> B -> A -> B`` where ``B`` has >= 2 FKs into
+            the entity table ``A`` (e.g. ``nodes <- edges(src_id, dst_id)``);
+          * bipartite / heterogeneous -- ``A -> B -> C -> B -> A`` (e.g.
+            ``users -> interactions -> items -> interactions -> users``, the classic
+            collaborative-filtering shape).
 
-        is dropped even though each hop lands on a *different* set of rows
-        (one->many followed by many->one). These features encode genuine
-        multi-hop / neighborhood aggregations and are highly informative.
+        This method enumerates these features directly as a bounded, non-degenerate
+        walk over the schema's FK multigraph and materializes each walk into an
+        ordinary featuretools ``FeatureBase`` (so both engines compute them, cutoff
+        times included).
 
-        This method manually constructs those missing features as ordinary
-        featuretools ``FeatureBase`` objects, so both the featuretools engine
-        and the dfs2sql engine compute them correctly (cutoff times included).
+        General rule (see dev_logs/022_TRAVERSE_BACK_FEATURES_PLAN.md, section 10):
 
-        Depth contract: one traverse-back round adds +2 to a feature's
-        ``get_depth()`` (a DirectFeature climb-back hop plus an AggregationFeature
-        re-aggregation hop). Standard features are depth 2, so traverse-back
-        features first appear at ``max_depth >= 4``. We enforce
-        ``final.get_depth() <= config.max_depth`` as the authoritative gate.
+          * Walk from the target along FK edges in either direction (``up`` =
+            DirectFeature/join, ``down`` = AggregationFeature).
+          * Length bounded by ``max_depth`` (featuretools ``get_depth()``).
+          * Table revisits bounded by ``max_revisits``.
+          * **Degeneracy prune**: never wrap a feature in an ``AggregationFeature``
+            down edge ``e`` when its immediate base is a ``DirectFeature`` up the
+            *same* edge ``e`` -- that round trip is the identity (a many->one climb
+            followed by re-grouping by the same parent recovers the original group).
+          * Aggregation hops are type-matched to the inner feature's output schema.
 
-        See ``dev_logs/022_TRAVERSE_BACK_FEATURES_PLAN.md`` for the full design.
+        Only features that actually revisit a table are returned; plain
+        table-simple features (already produced by featuretools) are filtered out by
+        name against ``existing_features``.
         """
         if not config.traverse_back:
             return []
-
         if config.max_depth < 4:
-            # A traverse-back round needs depth >= 4; nothing to do.
+            # A revisiting path needs at least 4 hops (target -> A -> B -> A -> B).
             return []
 
-        from featuretools.feature_base import AggregationFeature, DirectFeature
+        from featuretools.feature_base import AggregationFeature, DirectFeature, IdentityFeature
         from featuretools.entityset.relationship import RelationshipPath
         from woodwork.column_schema import ColumnSchema
 
         max_depth = config.max_depth
+        max_revisits = max(0, config.max_revisits)
+        if max_revisits == 0:
+            return []
+        # A single conceptual traverse-back "round" (A -> B -> A -> B) re-enters two
+        # tables (A and B again), so the raw table-revisit budget is 2 per round.
+        revisit_budget = 2 * max_revisits
 
-        # ------------------------------------------------------------------
-        # Step 1: detect traverse-back candidate pairs (A, B).
-        #   A is a parent (entity) table; B is a child (relation) table that has
-        #   >= 2 distinct FK relationships into A. Exclude __target__.
-        # ------------------------------------------------------------------
-        # Map (parent_table, child_table) -> list of relationships (B.fk -> A.pk)
-        pair_rels: Dict[Tuple[str, str], List] = {}
+        # ------------------------------------------------------------------ #
+        # Relationship key columns (to identify keys and avoid aggregating them).
+        # ------------------------------------------------------------------ #
+        key_columns = set()
         for rel in entity_set.relationships:
-            parent_name = rel._parent_dataframe_name
-            child_name = rel._child_dataframe_name
-            if parent_name == target_entity_name or child_name == target_entity_name:
-                continue
-            pair_rels.setdefault((parent_name, child_name), []).append(rel)
+            key_columns.add((rel._parent_dataframe_name, rel._parent_column_name))
+            key_columns.add((rel._child_dataframe_name, rel._child_column_name))
 
-        # Keep only pairs with >= 2 FKs (single-FK climb-back is degenerate).
-        # Sort relationships by child column name for deterministic output.
-        candidates: Dict[Tuple[str, str], List] = {}
-        for pair, rels in pair_rels.items():
-            if len(rels) >= 2:
-                candidates[pair] = sorted(rels, key=lambda r: r._child_column_name)
+        # ------------------------------------------------------------------ #
+        # Adjacency on the FK multigraph: table -> list of (relationship, direction,
+        # neighbor_table). 'up' follows a child->parent FK (DirectFeature); 'down'
+        # follows parent->child (AggregationFeature).
+        # ------------------------------------------------------------------ #
+        def neighbors(table):
+            out = []
+            for rel in entity_set.relationships:
+                if rel._child_dataframe_name == table:
+                    out.append((rel, "up", rel._parent_dataframe_name))
+                if rel._parent_dataframe_name == table:
+                    out.append((rel, "down", rel._child_dataframe_name))
+            # deterministic order
+            out.sort(key=lambda x: (x[1], x[0]._child_dataframe_name,
+                                    x[0]._child_column_name,
+                                    x[0]._parent_dataframe_name))
+            return out
 
-        if not candidates:
+        # ------------------------------------------------------------------ #
+        # Enumerate target-rooted walks that revisit at least one table, bounded by
+        # depth and max_revisits. Each walk is a list of (relationship, direction,
+        # next_table). We never walk back into the target table.
+        # ------------------------------------------------------------------ #
+        walks: List[List[Tuple[Any, str, str]]] = []
+
+        def walk(table, path, n_revisits, visited):
+            if len(path) >= max_depth:
+                return
+            for rel, direction, nb in neighbors(table):
+                if nb == target_entity_name:
+                    continue
+                revisited = nb in visited
+                nr = n_revisits + (1 if revisited else 0)
+                if nr > revisit_budget:
+                    continue
+                new_path = path + [(rel, direction, nb)]
+                # only keep walks that revisit at least one table (the rest are
+                # plain table-simple features featuretools already generated)
+                if nr >= 1:
+                    walks.append(new_path)
+                walk(nb, new_path, nr, visited | {nb})
+
+        walk(target_entity_name, [], 0, {target_entity_name})
+
+        if not walks:
             return []
 
-        logger.debug(
-            f"Traverse-back candidate pairs: {sorted(candidates.keys())}"
-        )
-
-        # ------------------------------------------------------------------
-        # Step 2: how does target connect to each parent table A?
-        # ------------------------------------------------------------------
-        target_to_parent_rels: Dict[str, List] = {}
-        for rel in entity_set.relationships:
-            if rel._child_dataframe_name == target_entity_name:
-                target_to_parent_rels.setdefault(
-                    rel._parent_dataframe_name, []
-                ).append(rel)
-        for parent in target_to_parent_rels:
-            target_to_parent_rels[parent] = sorted(
-                target_to_parent_rels[parent], key=lambda r: r._child_column_name
-            )
-
-        # ------------------------------------------------------------------
-        # Step 3: resolve aggregation primitives to objects (for outer aggs).
-        # ------------------------------------------------------------------
+        # ------------------------------------------------------------------ #
+        # Aggregation primitives, resolved to objects.
+        # ------------------------------------------------------------------ #
         resolved_primitives = []
         for prim in self._convert_primitives(config.agg_primitives):
             if isinstance(prim, str):
@@ -551,158 +584,134 @@ class DFSEngine:
             else:
                 resolved_primitives.append(prim)
 
-        def _semantic_tags(column_schema) -> set:
+        def _tags(column_schema):
             if isinstance(column_schema, ColumnSchema):
                 return set(column_schema.semantic_tags or set())
             return set()
 
-        def _primitives_for(column_schema) -> List:
-            """Outer primitives whose input type matches an inner output schema.
+        count_prims = [p for p in resolved_primitives
+                       if (getattr(p, "name", "") or "").lower() == "count"]
+        value_prims = [p for p in resolved_primitives
+                       if (getattr(p, "name", "") or "").lower() != "count"]
 
-            COUNT is excluded here: it counts rows, not values, so re-applying it
-            to a traverse-back value is meaningless (it would just re-count edges).
-            """
-            seed_tags = _semantic_tags(column_schema)
+        def _agg_prims_for(column_schema):
+            """Aggregation primitives whose input type matches a feature's output."""
+            seed_tags = _tags(column_schema)
             out = []
-            for prim in resolved_primitives:
-                pname = getattr(prim, "name", "") or ""
-                if pname.lower() == "count":
-                    continue
+            for prim in value_prims:
                 input_types = getattr(prim, "input_types", None)
                 if not input_types:
                     continue
-                in_schema = input_types[0]
-                in_tags = _semantic_tags(in_schema)
-                # Match if the primitive's required input tags overlap the seed's
-                # output tags (e.g. numeric->numeric, category->category).
+                in_tags = _tags(input_types[0])
                 if in_tags and seed_tags and (in_tags & seed_tags):
                     out.append(prim)
             return out
 
-        # ------------------------------------------------------------------
-        # Step 4: collect the level-0 seeds — AggregationFeatures living on each
-        #   entity table A, taken from the standard features featuretools already
-        #   produced (which are DirectFeature(agg_on_A, __target__)).
-        #   Seed state: (agg_feature, current_depth_on_A).
-        # ------------------------------------------------------------------
-        seeds_by_parent: Dict[str, List[Tuple[ft.FeatureBase, int]]] = {}
-        for feat in existing_features:
-            if isinstance(feat, DirectFeature) and feat.dataframe_name == target_entity_name:
-                base = feat.base_features[0]
-                if isinstance(base, AggregationFeature):
-                    seeds_by_parent.setdefault(base.dataframe_name, []).append(
-                        (base, base.get_depth())
-                    )
+        # ------------------------------------------------------------------ #
+        # Seed features on a table: identity features of its non-key columns.
+        # ------------------------------------------------------------------ #
+        def _seed_features(table):
+            df = entity_set[table]
+            seeds = []
+            for col in df.columns:
+                if (table, col) in key_columns:
+                    continue
+                tags = set(df.ww.semantic_tags.get(col, set()))
+                if "index" in tags or "foreign_key" in tags:
+                    continue
+                seeds.append(IdentityFeature(df.ww[col]))
+            return seeds
 
-        if not seeds_by_parent:
-            return []
-
-        new_features: List[ft.FeatureBase] = []
+        # ------------------------------------------------------------------ #
+        # Materialize a walk into target-rooted features, inside-out.
+        # ------------------------------------------------------------------ #
         existing_names = {f.get_name() for f in existing_features}
+        new_features: List[ft.FeatureBase] = []
+        seen_new = set()
 
-        def _emit_rooted(agg_on_parent, parent_table):
-            """Wrap an agg-on-A in a DirectFeature for each target->A FK and emit
-            if within depth budget and not a duplicate."""
-            for target_rel in target_to_parent_rels.get(parent_table, []):
-                try:
-                    final = DirectFeature(
-                        base_feature=agg_on_parent,
-                        child_dataframe_name=target_entity_name,
-                        relationship=target_rel,
-                    )
-                except Exception as e:  # pragma: no cover - defensive
-                    logger.debug(f"Could not root traverse-back feature: {e}")
-                    continue
-                if final.get_depth() > max_depth:
-                    continue
-                name = final.get_name()
-                if name in existing_names:
-                    continue
-                if config.max_features > 0 and (
-                    len(existing_names) >= config.max_features
-                ):
-                    return
-                new_features.append(final)
-                existing_names.add(name)
+        def _emit(feature):
+            if feature.get_depth() > max_depth:
+                return
+            name = feature.get_name()
+            if name in existing_names or name in seen_new:
+                return
+            if config.max_features > 0 and (
+                len(existing_names) + len(seen_new) >= config.max_features
+            ):
+                return
+            new_features.append(feature)
+            seen_new.add(name)
 
-        # ------------------------------------------------------------------
-        # Step 5: bounded BFS over agg-on-A states. Each round consumes the
-        #   previous round's aggs as seeds and produces depth+2 aggs.
-        # ------------------------------------------------------------------
-        # frontier: parent_table -> list of (agg_on_A, depth_on_A)
-        frontier = {p: list(seeds) for p, seeds in seeds_by_parent.items()}
+        def _materialize(path):
+            deepest = path[-1][2]
+            # The innermost hop being 'down' means we can also seed with a COUNT over
+            # the deepest table's index; otherwise seed with identity value features.
+            feats = list(_seed_features(deepest))
+            innermost_rel, innermost_dir, _ = path[-1]
 
-        # A round produces an agg of depth d+2 on A; the final rooted feature is
-        # depth d+3 (one more DirectFeature to target). Continue while d+3 <= max.
-        while True:
-            next_frontier: Dict[str, List[Tuple[ft.FeatureBase, int]]] = {}
-            produced_any = False
-
-            for (parent_table, child_table), rels in candidates.items():
-                for seed_agg, seed_depth in frontier.get(parent_table, []):
-                    # The rooted feature from one more round is depth seed_depth+3.
-                    if seed_depth + 3 > max_depth:
-                        continue
-                    # Which relationship did this seed aggregate over?
-                    seed_path = seed_agg.relationship_path
-                    if not seed_path or len(seed_path) == 0:
-                        continue
-                    _, seed_rel = seed_path[0]
-                    if seed_rel._child_dataframe_name != child_table:
-                        continue
-
-                    outer_prims = _primitives_for(seed_agg.column_schema)
-                    if not outer_prims:
-                        continue
-
-                    for lookup_rel in rels:
-                        for outer_rel in rels:
-                            # Exclude degenerate climb-back: descending and
-                            # climbing through the SAME FK returns the same rows.
-                            if lookup_rel._child_column_name == outer_rel._child_column_name:
-                                continue
+            # Build inside-out: process hops from deepest to the target.
+            for i in range(len(path) - 1, -1, -1):
+                rel, direction, table = path[i]
+                parent_or_child = target_entity_name if i == 0 else path[i - 1][2]
+                next_feats = []
+                if direction == "down":
+                    # AggregationFeature: parent_or_child <- table via rel
+                    for f in feats:
+                        # Degeneracy prune: never aggregate (down e) a feature whose
+                        # immediate base is a DirectFeature up the SAME edge e.
+                        if isinstance(f, DirectFeature):
                             try:
-                                direct_back = DirectFeature(
-                                    base_feature=seed_agg,
-                                    child_dataframe_name=child_table,
-                                    relationship=lookup_rel,
-                                )
-                            except Exception as e:  # pragma: no cover - defensive
-                                logger.debug(f"traverse-back direct failed: {e}")
+                                _, f_rel = f.relationship_path[0]
+                            except (IndexError, TypeError):
+                                f_rel = None
+                            if f_rel is rel:
                                 continue
+                        prims = _agg_prims_for(f.column_schema)
+                        for prim in prims:
+                            try:
+                                next_feats.append(AggregationFeature(
+                                    [f], parent_or_child, prim,
+                                    RelationshipPath([(False, rel)]),
+                                ))
+                            except (AssertionError, Exception):
+                                continue
+                    # COUNT(table) seed: the innermost down hop can count rows.
+                    if i == len(path) - 1:
+                        for cprim in count_prims:
+                            try:
+                                idx_feat = IdentityFeature(
+                                    entity_set[table].ww[entity_set[table].ww.index]
+                                )
+                                next_feats.append(AggregationFeature(
+                                    [idx_feat], parent_or_child, cprim,
+                                    RelationshipPath([(False, rel)]),
+                                ))
+                            except (AssertionError, Exception):
+                                continue
+                else:
+                    # DirectFeature: parent_or_child (child) -> table (parent) via rel
+                    for f in feats:
+                        try:
+                            next_feats.append(DirectFeature(f, parent_or_child, rel))
+                        except (AssertionError, Exception):
+                            continue
+                feats = next_feats
+                if not feats:
+                    break
 
-                            for prim in outer_prims:
-                                try:
-                                    outer_agg = AggregationFeature(
-                                        base_features=[direct_back],
-                                        parent_dataframe_name=parent_table,
-                                        primitive=prim,
-                                        relationship_path=RelationshipPath(
-                                            [(False, outer_rel)]
-                                        ),
-                                    )
-                                except (AssertionError, Exception) as e:
-                                    logger.debug(f"traverse-back agg failed: {e}")
-                                    continue
+            for f in feats:
+                if f.dataframe_name == target_entity_name:
+                    _emit(f)
 
-                                # Emit rooted feature(s) for this new agg.
-                                _emit_rooted(outer_agg, parent_table)
-                                produced_any = True
-
-                                # Queue for the next round if budget allows.
-                                new_depth = outer_agg.get_depth()
-                                if new_depth + 3 <= max_depth:
-                                    next_frontier.setdefault(
-                                        parent_table, []
-                                    ).append((outer_agg, new_depth))
-
-            if config.max_features > 0 and len(existing_names) >= config.max_features:
+        for path in walks:
+            if config.max_features > 0 and (
+                len(existing_names) + len(seen_new) >= config.max_features
+            ):
                 break
-            if not produced_any or not next_frontier:
-                break
-            frontier = next_frontier
+            _materialize(path)
 
         return new_features
+
 
     @abc.abstractmethod
     def compute_feature_matrix(
