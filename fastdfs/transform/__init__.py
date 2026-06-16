@@ -18,6 +18,7 @@ from .filter_transform import FilterColumn
 from .dummy_table_transform import HandleDummyTable
 from .fill_missing_pk import FillMissingPrimaryKey
 from .type_transform import CanonicalizeTypes
+from .encode_categorical import EncodeCategoryColumns, EncodeCategoryColumnsRDB
 from .utils import apply_transform, apply_transform_pipeline
 
 __all__ = [
@@ -31,6 +32,8 @@ __all__ = [
     "HandleDummyTable",
     "FillMissingPrimaryKey",
     "CanonicalizeTypes",
+    "EncodeCategoryColumns",
+    "EncodeCategoryColumnsRDB",
     "apply_transform",
     "apply_transform_pipeline",
 ]

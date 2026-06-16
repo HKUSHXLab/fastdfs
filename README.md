@@ -210,6 +210,7 @@ features = pipeline.run(
 
 - **[User Guide](docs/user_guide.md)**: Complete tutorial with concepts and examples
 - **[API Reference](docs/api_reference.md)**: Detailed API documentation
+- **[Aggregation Primitives](docs/aggregation_primitives.md)**: Supported `agg_primitives` for dfs2sql and featuretools
 - **[Examples](examples/)**: Runnable code examples
 
 ## Why FastDFS?

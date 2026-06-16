@@ -197,18 +197,7 @@ class DFSConfig(pydantic.BaseModel):
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation
 
-**Available Aggregation Primitives:**
-
-| Primitive | Description | Example |
-|-----------|-------------|---------|
-| `count` | Count of related records | Number of user interactions |
-| `mean` | Average value | Average user rating |
-| `max` | Maximum value | Highest item price |
-| `min` | Minimum value | Lowest rating given |
-| `std` | Standard deviation | Rating variability |
-| `sum` | Sum of values | Total purchase amount |
-| `mode` | Most frequent value | Most common category |
-| `nunique` | Count of unique values | Number of unique items |
+**Aggregation primitives:** See **[Aggregation Primitives](aggregation_primitives.md)** for defaults, FastDFS-specific primitives (`quantile_25`, `quantile_75`, `discrete_entropy`), dfs2sql vs featuretools support, SQL mappings, and categorical encoding notes.
 
 **Example:**
 ```python

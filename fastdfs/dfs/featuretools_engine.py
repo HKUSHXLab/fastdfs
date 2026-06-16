@@ -69,7 +69,7 @@ class FeaturetoolsEngine(DFSEngine):
                 features=features,
                 entityset=entity_set,
                 cutoff_time=cutoff_times,
-                include_cutoff_time=False,  # Use strict < for cutoff time
+                include_cutoff_time=config.include_cutoff_time,
                 chunk_size=config.chunk_size,
                 n_jobs=config.n_jobs,
                 progress_callback=_cb

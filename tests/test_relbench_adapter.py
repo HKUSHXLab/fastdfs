@@ -107,6 +107,175 @@ class TestRelBenchAdapter(unittest.TestCase):
 
     @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
     @patch('fastdfs.adapter.relbench.get_dataset')
+    def test_load_rel_salt_type_hints(self, mock_get_dataset, mock_relbench):
+        mock_dataset = MagicMock()
+        mock_db = MagicMock()
+        mock_dataset.get_db.return_value = mock_db
+        mock_get_dataset.return_value = mock_dataset
+
+        df_sales = pd.DataFrame({
+            "SALESDOCUMENT": [1, 2],
+            "CREATIONTIMESTAMP": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            "SALESDOCUMENTTYPE": ["OR", "TA"],
+            "SALESORGANIZATION": ["1000", "2000"],
+            "BILLINGCOMPANYCODE": ["BC1", "BC2"],
+            "TRANSACTIONCURRENCY": ["EUR", "USD"],
+            "SALESOFFICE": [1, 2],
+            "CUSTOMERPAYMENTTERMS": [10, 20],
+            "SHIPPINGCONDITION": [1, 2],
+            "HEADERINCOTERMSCLASSIFICATION": [1, 2],
+            "DISTRIBUTIONCHANNEL": ["10", "20"],
+            "ORGANIZATIONDIVISION": ["00", "01"],
+            "SALESGROUP": [1, 2],
+        })
+        table_sales = MagicMock()
+        table_sales.df = df_sales
+        table_sales.pkey_col = "SALESDOCUMENT"
+        table_sales.time_col = "CREATIONTIMESTAMP"
+        table_sales.fkey_col_to_pkey_table = {}
+
+        df_items = pd.DataFrame({
+            "ID": [1, 2],
+            "SALESDOCUMENT": [1, 2],
+            "CREATIONTIMESTAMP": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            "PRODUCT": ["P1", "P2"],
+            "SALESDOCUMENTITEM": ["10", "20"],
+            "SALESDOCUMENTITEMCATEGORY": ["A", "B"],
+            "PLANT": ["PL1", "PL2"],
+            "SHIPPINGPOINT": ["SP1", "SP2"],
+            "ITEMINCOTERMSCLASSIFICATION": [1, 2],
+            "SOLDTOPARTY": [100, 200],
+            "SHIPTOPARTY": [1, 2],
+            "BILLTOPARTY": [3, 4],
+            "PAYERPARTY": [5, 6],
+        })
+        table_items = MagicMock()
+        table_items.df = df_items
+        table_items.pkey_col = "ID"
+        table_items.time_col = "CREATIONTIMESTAMP"
+        table_items.fkey_col_to_pkey_table = {
+            "SALESDOCUMENT": "salesdocument",
+            "SOLDTOPARTY": "customer",
+        }
+
+        df_address = pd.DataFrame({
+            "ADDRESSID": [1, 2],
+            "COUNTRY": ["DE", "US"],
+            "REGION": ["BY", "CA"],
+        })
+        table_address = MagicMock()
+        table_address.df = df_address
+        table_address.pkey_col = "ADDRESSID"
+        table_address.time_col = None
+        table_address.fkey_col_to_pkey_table = {}
+
+        df_customer = pd.DataFrame({
+            "CUSTOMER": [100, 200],
+            "ADDRESSID": [1, 2],
+        })
+        table_customer = MagicMock()
+        table_customer.df = df_customer
+        table_customer.pkey_col = "CUSTOMER"
+        table_customer.time_col = None
+        table_customer.fkey_col_to_pkey_table = {"ADDRESSID": "address"}
+
+        mock_db.table_dict = {
+            "salesdocument": table_sales,
+            "salesdocumentitem": table_items,
+            "address": table_address,
+            "customer": table_customer,
+        }
+
+        adapter = RelBenchAdapter(dataset_name="rel-salt")
+        rdb = adapter.load()
+
+        sales_meta = rdb.get_table_metadata("salesdocument")
+        for col in (
+            "SALESDOCUMENTTYPE",
+            "SALESORGANIZATION",
+            "BILLINGCOMPANYCODE",
+            "TRANSACTIONCURRENCY",
+            "SALESOFFICE",
+            "CUSTOMERPAYMENTTERMS",
+            "SHIPPINGCONDITION",
+            "HEADERINCOTERMSCLASSIFICATION",
+        ):
+            self.assertEqual(
+                sales_meta.column_dict[col].dtype,
+                RDBColumnDType.category_t,
+                msg=f"{col} should be category_t",
+            )
+
+        items_meta = rdb.get_table_metadata("salesdocumentitem")
+        items_df = rdb.tables["salesdocumentitem"]
+        for party in ("SHIPTOPARTY", "BILLTOPARTY", "PAYERPARTY"):
+            self.assertNotIn(party, items_df.columns)
+        self.assertIn("SOLDTOPARTY", items_df.columns)
+        self.assertEqual(items_meta.column_dict["PRODUCT"].dtype, RDBColumnDType.text_t)
+        self.assertEqual(items_meta.column_dict["PLANT"].dtype, RDBColumnDType.category_t)
+
+        address_meta = rdb.get_table_metadata("address")
+        self.assertEqual(address_meta.column_dict["COUNTRY"].dtype, RDBColumnDType.category_t)
+        self.assertEqual(address_meta.column_dict["REGION"].dtype, RDBColumnDType.category_t)
+
+    @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
+    @patch('fastdfs.adapter.relbench.get_dataset')
+    def test_load_rel_salt_strips_task_target(self, mock_get_dataset, mock_relbench):
+        mock_dataset = MagicMock()
+        mock_db = MagicMock()
+        mock_dataset.get_db.return_value = mock_db
+        mock_get_dataset.return_value = mock_dataset
+
+        df_sales = pd.DataFrame({
+            "SALESDOCUMENT": [1, 2],
+            "CREATIONTIMESTAMP": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            "CUSTOMERPAYMENTTERMS": [10, 20],
+            "HEADERINCOTERMSCLASSIFICATION": [1, 2],
+            "SALESOFFICE": [1, 2],
+        })
+        table_sales = MagicMock()
+        table_sales.df = df_sales
+        table_sales.pkey_col = "SALESDOCUMENT"
+        table_sales.time_col = "CREATIONTIMESTAMP"
+        table_sales.fkey_col_to_pkey_table = {}
+
+        df_items = pd.DataFrame({
+            "ID": [1, 2],
+            "SALESDOCUMENT": [1, 2],
+            "CREATIONTIMESTAMP": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            "ITEMINCOTERMSCLASSIFICATION": [1, 2],
+            "PLANT": ["PL1", "PL2"],
+        })
+        table_items = MagicMock()
+        table_items.df = df_items
+        table_items.pkey_col = "ID"
+        table_items.time_col = "CREATIONTIMESTAMP"
+        table_items.fkey_col_to_pkey_table = {"SALESDOCUMENT": "salesdocument"}
+
+        mock_db.table_dict = {
+            "salesdocument": table_sales,
+            "salesdocumentitem": table_items,
+        }
+
+        adapter = RelBenchAdapter(dataset_name="rel-salt", for_task="sales-payterms")
+        rdb = adapter.load()
+        sales_df = rdb.tables["salesdocument"]
+        self.assertNotIn("CUSTOMERPAYMENTTERMS", sales_df.columns)
+        self.assertIn("HEADERINCOTERMSCLASSIFICATION", sales_df.columns)
+
+        adapter_inc = RelBenchAdapter(dataset_name="rel-salt", for_task="item-incoterms")
+        rdb_inc = adapter_inc.load()
+        self.assertNotIn(
+            "HEADERINCOTERMSCLASSIFICATION",
+            rdb_inc.tables["salesdocument"].columns,
+        )
+        self.assertNotIn(
+            "ITEMINCOTERMSCLASSIFICATION",
+            rdb_inc.tables["salesdocumentitem"].columns,
+        )
+
+    @patch('fastdfs.adapter.relbench.relbench', new_callable=MagicMock)
+    @patch('fastdfs.adapter.relbench.get_dataset')
     def test_load_relationships(self, mock_get_dataset, mock_relbench):
         # Mock RelBench Dataset and Database
         mock_dataset = MagicMock()
