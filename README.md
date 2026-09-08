@@ -1,4 +1,4 @@
-# FastDFS - Deep Feature Synthesis for Tabular Data
+# FastDFS - Deep Feature Synthesis for Relational Database
 
 FastDFS is a Python library for automated feature engineering using Deep Feature Synthesis (DFS). It augments target dataframes with rich features derived from relational database structures, making it easy to create powerful features for machine learning without manual feature engineering.
 
