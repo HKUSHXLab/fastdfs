@@ -26,6 +26,14 @@ enriched_df = fastdfs.compute_dfs_features(
 )
 # Result: Original columns + 50+ new features like user_avg_rating, item_count_purchases, etc.
 ```
+## Engine Comparison
+
+| Feature | Featuretools | DFS2SQL |
+|---------|-------------|---------|
+| **Performance** | Good for small data | Excellent for large data |
+| **Memory Usage** | High (pandas) | Low (SQL-based) |
+| **Primitives** | Rich set | Core primitives |
+| **Backend** | Pandas | DuckDB |
 
 ## Installation
 
@@ -35,7 +43,7 @@ pip install fastdfs
 
 Or for development:
 ```bash
-git clone https://github.com/dglai/fastdfs.git
+git clone https://github.com/HKUSHXLab/fastdfs.git
 cd fastdfs
 pip install -e .
 ```
@@ -197,14 +205,6 @@ features = pipeline.run(
 - **Type Safety**: Full type hints and runtime validation
 - **Minimal Dependencies**: Focused, lightweight package
 
-## Engine Comparison
-
-| Feature | Featuretools | DFS2SQL |
-|---------|-------------|---------|
-| Performance | Good for small data | Excellent for large data |
-| Memory Usage | High (pandas) | Low (SQL-based) |
-| Primitives | Rich set | Core primitives |
-| Backend | Pandas | DuckDB |
 
 ## Documentation
 
