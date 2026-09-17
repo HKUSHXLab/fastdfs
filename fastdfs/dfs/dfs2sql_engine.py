@@ -4,11 +4,14 @@ SQL-based DFS engine implementation for the new interface.
 
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
+import os
 import pandas as pd
 import featuretools as ft
 from sql_formatter.core import format_sql
 import tqdm
 from loguru import logger
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from .base_engine import DFSEngine, DFSConfig, dfs_engine
 from ..dataset.rdb import RDB
@@ -150,23 +153,15 @@ class DFS2SQLEngine(DFSEngine):
             include_cutoff_time=config.include_cutoff_time,
         )
 
-        # Execute SQLs and merge results (reuse existing logic)
+        # Execute SQLs (sequential or connection-per-worker pool).
         logger.debug("Executing SQLs ...")
-        dataframes = []
-        for sql in tqdm.tqdm(sqls):
-            logger.debug(f"Executing SQL: {format_sql(sql.sql())}")
-            result = db.sql(sql.sql())
-            if result is not None:
-                dataframe = result.df()
-
-                # Clean up result dataframe (reuse existing logic)
-                if cutoff_time_col_name in dataframe.columns:
-                    dataframe.drop(columns=[cutoff_time_col_name], inplace=True)
-                dataframe.rename(decode_column_from_sql, axis="columns", inplace=True)
-                dataframes.append(dataframe)
-            else:
-                # SQLs that produce no result are skipped (e.g., CREATE TABLE)
-                pass
+        dataframes = self._execute_feature_sqls(
+            sqls,
+            db=db,
+            engine_path=Path(engine_path),
+            config=config,
+            cutoff_time_col_name=cutoff_time_col_name,
+        )
 
         # Assemble all feature dataframes (index-aligned concat; see ``assemble_dfs2sql_feature_frames``).
         if dataframes:
@@ -194,6 +189,101 @@ class DFS2SQLEngine(DFSEngine):
             logger.warning("No features generated from SQL execution.")
             # Return dataframe with just the target index to satisfy contract
             return pd.DataFrame({target_index: target_dataframe[target_index]})
+
+    def _effective_sql_workers(self, config: DFSConfig) -> int:
+        return max(1, int(getattr(config, "dfs2sql_sql_workers", 1) or 1))
+
+    @staticmethod
+    def _postprocess_sql_frame(
+        dataframe: pd.DataFrame,
+        cutoff_time_col_name: Optional[str],
+    ) -> pd.DataFrame:
+        if cutoff_time_col_name is not None and cutoff_time_col_name in dataframe.columns:
+            dataframe = dataframe.drop(columns=[cutoff_time_col_name])
+        return dataframe.rename(decode_column_from_sql, axis="columns")
+
+    def _execute_feature_sqls(
+        self,
+        sqls: List[Any],
+        *,
+        db: Any,
+        engine_path: Path,
+        config: DFSConfig,
+        cutoff_time_col_name: Optional[str],
+    ) -> List[pd.DataFrame]:
+        """Run feature SQLs sequentially or with a connection-per-worker pool."""
+        workers = self._effective_sql_workers(config)
+        sql_texts = [sql.sql() for sql in sqls]
+        if workers == 1 or len(sql_texts) <= 1:
+            dataframes: List[pd.DataFrame] = []
+            for text in tqdm.tqdm(sql_texts):
+                logger.debug("Executing SQL: {}", format_sql(text))
+                result = db.sql(text)
+                if result is not None:
+                    dataframes.append(
+                        self._postprocess_sql_frame(result.df(), cutoff_time_col_name)
+                    )
+            return dataframes
+
+        logger.info(
+            "dfs2sql: executing {} SQL(s) with {} worker connection(s)",
+            len(sql_texts),
+            workers,
+        )
+        # Flush writer state so sibling connections see all tables.
+        try:
+            db.execute("CHECKPOINT")
+        except Exception as e:
+            logger.debug("CHECKPOINT before parallel SQL failed (continuing): {}", e)
+
+        import duckdb
+
+        cpu_count = os.cpu_count() or 1
+        # Leave enough intra-query threads; oversubscription is preferable to starving each query.
+        threads_per_worker = max(2, cpu_count // max(1, workers))
+        thread_local = threading.local()
+        opened: List[Any] = []
+        opened_lock = threading.Lock()
+
+        def _worker_connection():
+            con = getattr(thread_local, "con", None)
+            if con is None:
+                # Same DB file as the primary writer (required by DuckDB).
+                con = duckdb.connect(str(engine_path), read_only=False)
+                try:
+                    con.execute(f"SET threads={threads_per_worker}")
+                except Exception:
+                    pass
+                thread_local.con = con
+                with opened_lock:
+                    opened.append(con)
+            return con
+
+        def _run_one(item: Tuple[int, str]) -> Tuple[int, Optional[pd.DataFrame]]:
+            idx, text = item
+            logger.debug("Executing SQL[{}]: {}", idx, format_sql(text))
+            result = _worker_connection().sql(text)
+            if result is None:
+                return idx, None
+            return idx, self._postprocess_sql_frame(result.df(), cutoff_time_col_name)
+
+        slots: List[Optional[pd.DataFrame]] = [None] * len(sql_texts)
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(_run_one, (i, text)) for i, text in enumerate(sql_texts)
+                ]
+                for fut in tqdm.tqdm(as_completed(futures), total=len(futures)):
+                    idx, frame = fut.result()
+                    slots[idx] = frame
+        finally:
+            for con in opened:
+                try:
+                    con.close()
+                except Exception:
+                    pass
+
+        return [frame for frame in slots if frame is not None]
 
     def _build_database_tables(
         self,

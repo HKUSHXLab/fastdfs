@@ -43,7 +43,7 @@ Any name matching `quantile_XX` (e.g. `quantile_50`) is translated to `quantile_
 
 ## dfs2sql-supported primitives (recommended)
 
-The **dfs2sql** engine (`engine="dfs2sql"`) is the default. It generates one SQL query per feature and runs it in DuckDB. The following primitives are **documented and tested** for parity with the featuretools engine (see `tests/test_dfs_engines.py`):
+The **dfs2sql** engine (`engine="dfs2sql"`) is the default. It generates one SQL query per feature and runs it in DuckDB. Set `dfs2sql_sql_workers` &gt; 1 to execute independent feature SQLs on parallel DuckDB connections (default `1` = sequential). The following primitives are **documented and tested** for parity with the featuretools engine (see `tests/test_dfs_engines.py`):
 
 | Primitive | Typical column types | SQL / notes |
 |-----------|---------------------|-------------|

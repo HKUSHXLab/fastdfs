@@ -118,6 +118,9 @@ class DFSConfig(pydantic.BaseModel):
         n_jobs: Number of parallel jobs for computation
         dfs2sql_concat_chunk_size: dfs2sql only — number of per-feature SQL frames to concat per
             intermediate block when assembling the wide matrix (default 512).
+        dfs2sql_sql_workers: Number of parallel DuckDB connections for independent feature
+            SQLs (default 1 = sequential). Each worker opens its own connection to the
+            same DuckDB file after a CHECKPOINT so sibling connections see all tables.
         include_cutoff_time: When True, include RDB rows whose time equals the task cutoff
             (``<=`` in dfs2sql; featuretools ``include_cutoff_time=True``). Default False keeps
             strict ``<`` for other datasets.
@@ -142,6 +145,8 @@ class DFSConfig(pydantic.BaseModel):
     # dfs2sql: when stitching one DuckDB result per feature, concat this many skinny frames
     # at a time before a final horizontal concat (memory vs overhead tradeoff).
     dfs2sql_concat_chunk_size: int = 512
+    # Parallel feature SQL execution (one DuckDB connection per worker).
+    dfs2sql_sql_workers: int = 1
     include_cutoff_time: bool = False
 
 

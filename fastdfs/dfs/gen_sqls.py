@@ -12,7 +12,6 @@ from sqlglot.expressions import (
     EQ,
     LT,
     LTE,
-    Drop,
     Coalesce,
     Select,
     Identifier,
@@ -662,7 +661,8 @@ class FeatureBlockWithCutoffTime(FeatureBlock):
         temp_time_table_name = f"{self._feature.dataframe_name}_TEMP_TIME_DEPTH_{depth}"
         if parent_join_direction == JoinDirection.FORWARD:
             ast = ast.distinct()
-        ast = ast.ctas(temp_time_table_name)
+        # Plain SELECT — folded into a WITH CTE by ``features2sql`` (no CTAS).
+        # Self-contained statements are required for parallel DuckDB workers.
         asts = [ast]
         temp_tables = [temp_time_table_name]
         self._temp_time_table_name = temp_time_table_name
@@ -687,6 +687,7 @@ def gen_target_temp_time_table(
     cutoff_time_col_name: str,
     index_col_name:str
 ):
+    """Build the depth-0 cutoff join as a SELECT (used as a CTE, not CTAS)."""
     temp_table_name = f"{target_table_name}_TEMP_TIME_DEPTH_0"
     ast = (
         select(
@@ -713,9 +714,26 @@ def gen_target_temp_time_table(
                 ),
             )
         )
-        .ctas(temp_table_name)
     )
     return ast, temp_table_name
+
+
+def wrap_cutoff_ctes(
+    final_select: Select,
+    cte_selects: List[Select],
+    cte_names: List[str],
+) -> Select:
+    """Fold cutoff temp-table SELECTs into a single ``WITH ... SELECT``.
+
+    Replaces per-feature CTAS/DROP sequences so each feature SQL is self-contained
+    (safe for parallel DuckDB worker connections).
+    """
+    if len(cte_selects) != len(cte_names):
+        raise ValueError("wrap_cutoff_ctes: cte_selects and cte_names length mismatch")
+    q = final_select
+    for name, cte_ast in zip(cte_names, cte_selects):
+        q = q.with_(name, as_=cte_ast)
+    return q
 
 
 def features2sql(
@@ -753,7 +771,7 @@ def features2sql(
                 continue
             feature_block._time_col = cutoff_time_col_name
             feature_block._temp_time_table_name = temp_target_table_name
-            asts = [target_time_ast]
+            cte_asts = [target_time_ast]
             temp_tables = [temp_target_table_name]
             if feature_block._child is not None:
                 this_join_key, _ = feature_block._get_join_keys()
@@ -767,13 +785,19 @@ def features2sql(
                     parent_join_direction=feature_block._get_join_direction(),
                     time_col_mapping=time_col_mapping,
                 )
-                asts.extend(child_asts)
+                cte_asts.extend(child_asts)
                 temp_tables.extend(child_temp_tables)
             sql = feature_block.gen_sql()
-            asts.append(sql)
-            for temp_table in temp_tables:
-                asts.append(Drop(this=temp_table, kind="table"))
-            ret_asts.extend(asts)
+            # One self-contained statement: WITH temp_… AS (…) SELECT …
+            # Copy CTEs so successive features do not share mutated ASTs.
+            wrapped = wrap_cutoff_ctes(
+                sql, [cte.copy() for cte in cte_asts], temp_tables
+            )
+            logger.debug(
+                f"Generated cutoff CTE SQL for {f.get_name()}: \n"
+                f"{format_sql(wrapped.sql())}"
+            )
+            ret_asts.append(wrapped)
         return ret_asts
     sqls = []
     for f in features:
