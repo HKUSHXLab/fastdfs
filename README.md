@@ -26,11 +26,36 @@ enriched_df = fastdfs.compute_dfs_features(
 )
 # Result: Original columns + 50+ new features like user_avg_rating, item_count_purchases, etc.
 ```
+
+## 🆕 Parallel SQL (dfs2sql)
+
+DFS2SQL can run independent feature queries on **multiple DuckDB connections** via `dfs2sql_sql_workers` (default `1` = sequential). Cutoff plans are emitted as self-contained `WITH … SELECT` statements so workers do not share temp tables.
+
+```python
+features = fastdfs.compute_dfs_features(
+    rdb=rdb,
+    target_dataframe=target_df,
+    key_mappings=key_mappings,
+    cutoff_time_column="interaction_time",
+    config_overrides={"engine": "dfs2sql", "dfs2sql_sql_workers": 4},
+)
+```
+
+### Speedup vs sequential (n=10k, depth=4, workers=4)
+
+| Task | `sql_exec` | End-to-end wall |
+|------|------------|-----------------|
+| retailrocket (cvr) | **3.7×** | **2.5×** |
+| amazon (churn) | **4.7×** | **2.0×** |
+| stackexchange (churn) | **1.1×** | **1.1×** |
+
+Full tables and setup notes: [dfs2sql parallel SQL benchmarks](docs/dfs2sql_parallel_sql_benchmarks.md).
+
 ## Engine Comparison
 
 | Feature | Featuretools | DFS2SQL |
 |---------|-------------|---------|
-| **Performance** | Good for small data | Excellent for large data |
+| **Performance** | Good for small data | Excellent for large data; optional parallel SQL workers |
 | **Memory Usage** | High (pandas) | Low (SQL-based) |
 | **Primitives** | Rich set | Core primitives |
 | **Backend** | Pandas | DuckDB |
@@ -199,6 +224,7 @@ features = pipeline.run(
 
 - **Table-Centric Design**: Augment any dataframe, not just predefined datasets
 - **Multiple DFS Engines**: Choose between Featuretools (pandas) or DFS2SQL (high-performance)
+- **🆕 Parallel Feature SQL**: Scale dfs2sql with `dfs2sql_sql_workers` (multi-connection DuckDB)
 - **Temporal Consistency**: Built-in cutoff time support prevents data leakage
 - **Flexible Key Mapping**: Connect target data to RDB with simple column mappings
 - **Transform Pipeline**: Composable preprocessing transforms for data cleaning
@@ -211,6 +237,7 @@ features = pipeline.run(
 - **[User Guide](docs/user_guide.md)**: Complete tutorial with concepts and examples
 - **[API Reference](docs/api_reference.md)**: Detailed API documentation
 - **[Aggregation Primitives](docs/aggregation_primitives.md)**: Supported `agg_primitives` for dfs2sql and featuretools
+- **🆕 [Parallel SQL Benchmarks](docs/dfs2sql_parallel_sql_benchmarks.md)**: Sequential vs parallel dfs2sql speedups
 - **[Examples](examples/)**: Runnable code examples
 
 ## Why FastDFS?
