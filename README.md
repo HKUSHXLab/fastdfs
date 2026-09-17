@@ -27,7 +27,7 @@ enriched_df = fastdfs.compute_dfs_features(
 # Result: Original columns + 50+ new features like user_avg_rating, item_count_purchases, etc.
 ```
 
-## 🆕 Parallel SQL (dfs2sql)
+## 🆕 Parallel SQL (DFS2SQL Engine)
 
 DFS2SQL can run independent feature queries on **multiple DuckDB connections** via `dfs2sql_sql_workers` (default `1` = sequential). Cutoff plans are emitted as self-contained `WITH … SELECT` statements so workers do not share temp tables.
 
