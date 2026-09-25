@@ -19,7 +19,6 @@ from sqlglot.expressions import (
     Literal,
 )
 import sqlglot
-from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pandas as pd
@@ -811,69 +810,4 @@ def features2sql(
         sql = feature_block.gen_sql()
         logger.debug(f"Generated SQL for {f.get_name()}: \n" f"{format_sql(sql.sql())}")
         sqls.append(sql)
-    sqls = group_sqls(sqls)
     return sqls
-
-
-def group_sqls(sqls: List[Select]) -> List[Select]:
-    new_sqls = []
-    grouped_sqls = defaultdict(list)
-    for i, sql in enumerate(sqls):
-        grouped_sqls[get_join_path(sql)].append((i, sql))
-
-    for group in grouped_sqls.values():
-        idxs = [g[0] for g in group]
-        merging_sqls = [g[1] for g in group]
-        merged_sql = merge(merging_sqls)
-        new_sqls.append(merged_sql)
-        if len(idxs) > 1:
-            logger.debug(f"Merge features with indexes {idxs} into one sql.")
-            sqls_str = "\n".join([format_sql(sql.sql()) for sql in merging_sqls])
-            logger.debug("Merging SQLs: \n" f"{sqls_str}")
-            logger.debug("Merged SQL: \n" f"{format_sql(merged_sql.sql())}")
-    return new_sqls
-
-
-def get_join_path(sql) -> str:
-    ret = ()
-    if isinstance(sql, Select):
-        ret += ("SELECT", sql.args["from"].sql())
-        if "joins" in sql.args:
-            for join in sql.args["joins"]:
-                ret += get_join_path(join)
-        if "group" in sql.args:
-            ret += get_join_path(sql.args["group"])
-    elif isinstance(sql, Join):
-        ret += ("JOIN", sql.args["kind"], sql.args["on"].sql())
-        ret += get_join_path(sql.args["this"])
-    elif isinstance(sql, Group):
-        ret += ("GROUP", sql.sql())
-    elif isinstance(sql, Subquery):
-        ret += get_join_path(sql.args["this"])
-        if "alias" in sql.args:
-            ret += ("AS", sql.args["alias"].sql())
-    else:
-        ret += (sql.sql(),)
-    return ret
-
-
-def merge(sqls) -> Select:
-    if len(sqls) == 1:
-        return sqls[0]
-    new_sql = sqls[0].copy()
-
-    if isinstance(new_sql, Select):
-        exps = [sql.args["expressions"] for sql in sqls]
-        exps_set = set(exp for sublist in exps for exp in sublist)
-        new_sql.set("expressions", exps_set)
-        if "joins" in new_sql.args:
-            new_joins = []
-            for i in range(len(new_sql.args["joins"])):
-                new_joins.append(merge([sql.args["joins"][i] for sql in sqls]))
-            new_sql.set("joins", new_joins)
-    elif isinstance(new_sql, Join):
-        new_sql.set("this", merge([sql.args["this"] for sql in sqls]))
-    elif isinstance(new_sql, Subquery):
-        new_sql.set("this", merge([sql.args["this"] for sql in sqls]))
-
-    return new_sql
