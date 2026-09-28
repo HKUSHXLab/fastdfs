@@ -12,7 +12,6 @@ from sqlglot.expressions import (
     EQ,
     LT,
     LTE,
-    Drop,
     Coalesce,
     Select,
     Identifier,
@@ -20,7 +19,6 @@ from sqlglot.expressions import (
     Literal,
 )
 import sqlglot
-from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
 from enum import Enum
 import pandas as pd
@@ -662,7 +660,8 @@ class FeatureBlockWithCutoffTime(FeatureBlock):
         temp_time_table_name = f"{self._feature.dataframe_name}_TEMP_TIME_DEPTH_{depth}"
         if parent_join_direction == JoinDirection.FORWARD:
             ast = ast.distinct()
-        ast = ast.ctas(temp_time_table_name)
+        # Plain SELECT — folded into a WITH CTE by ``features2sql`` (no CTAS).
+        # Self-contained statements are required for parallel DuckDB workers.
         asts = [ast]
         temp_tables = [temp_time_table_name]
         self._temp_time_table_name = temp_time_table_name
@@ -687,6 +686,7 @@ def gen_target_temp_time_table(
     cutoff_time_col_name: str,
     index_col_name:str
 ):
+    """Build the depth-0 cutoff join as a SELECT (used as a CTE, not CTAS)."""
     temp_table_name = f"{target_table_name}_TEMP_TIME_DEPTH_0"
     ast = (
         select(
@@ -713,9 +713,26 @@ def gen_target_temp_time_table(
                 ),
             )
         )
-        .ctas(temp_table_name)
     )
     return ast, temp_table_name
+
+
+def wrap_cutoff_ctes(
+    final_select: Select,
+    cte_selects: List[Select],
+    cte_names: List[str],
+) -> Select:
+    """Fold cutoff temp-table SELECTs into a single ``WITH ... SELECT``.
+
+    Replaces per-feature CTAS/DROP sequences so each feature SQL is self-contained
+    (safe for parallel DuckDB worker connections).
+    """
+    if len(cte_selects) != len(cte_names):
+        raise ValueError("wrap_cutoff_ctes: cte_selects and cte_names length mismatch")
+    q = final_select
+    for name, cte_ast in zip(cte_names, cte_selects):
+        q = q.with_(name, as_=cte_ast)
+    return q
 
 
 def features2sql(
@@ -753,7 +770,7 @@ def features2sql(
                 continue
             feature_block._time_col = cutoff_time_col_name
             feature_block._temp_time_table_name = temp_target_table_name
-            asts = [target_time_ast]
+            cte_asts = [target_time_ast]
             temp_tables = [temp_target_table_name]
             if feature_block._child is not None:
                 this_join_key, _ = feature_block._get_join_keys()
@@ -767,13 +784,19 @@ def features2sql(
                     parent_join_direction=feature_block._get_join_direction(),
                     time_col_mapping=time_col_mapping,
                 )
-                asts.extend(child_asts)
+                cte_asts.extend(child_asts)
                 temp_tables.extend(child_temp_tables)
             sql = feature_block.gen_sql()
-            asts.append(sql)
-            for temp_table in temp_tables:
-                asts.append(Drop(this=temp_table, kind="table"))
-            ret_asts.extend(asts)
+            # One self-contained statement: WITH temp_… AS (…) SELECT …
+            # Copy CTEs so successive features do not share mutated ASTs.
+            wrapped = wrap_cutoff_ctes(
+                sql, [cte.copy() for cte in cte_asts], temp_tables
+            )
+            logger.debug(
+                f"Generated cutoff CTE SQL for {f.get_name()}: \n"
+                f"{format_sql(wrapped.sql())}"
+            )
+            ret_asts.append(wrapped)
         return ret_asts
     sqls = []
     for f in features:
@@ -787,69 +810,4 @@ def features2sql(
         sql = feature_block.gen_sql()
         logger.debug(f"Generated SQL for {f.get_name()}: \n" f"{format_sql(sql.sql())}")
         sqls.append(sql)
-    sqls = group_sqls(sqls)
     return sqls
-
-
-def group_sqls(sqls: List[Select]) -> List[Select]:
-    new_sqls = []
-    grouped_sqls = defaultdict(list)
-    for i, sql in enumerate(sqls):
-        grouped_sqls[get_join_path(sql)].append((i, sql))
-
-    for group in grouped_sqls.values():
-        idxs = [g[0] for g in group]
-        merging_sqls = [g[1] for g in group]
-        merged_sql = merge(merging_sqls)
-        new_sqls.append(merged_sql)
-        if len(idxs) > 1:
-            logger.debug(f"Merge features with indexes {idxs} into one sql.")
-            sqls_str = "\n".join([format_sql(sql.sql()) for sql in merging_sqls])
-            logger.debug("Merging SQLs: \n" f"{sqls_str}")
-            logger.debug("Merged SQL: \n" f"{format_sql(merged_sql.sql())}")
-    return new_sqls
-
-
-def get_join_path(sql) -> str:
-    ret = ()
-    if isinstance(sql, Select):
-        ret += ("SELECT", sql.args["from"].sql())
-        if "joins" in sql.args:
-            for join in sql.args["joins"]:
-                ret += get_join_path(join)
-        if "group" in sql.args:
-            ret += get_join_path(sql.args["group"])
-    elif isinstance(sql, Join):
-        ret += ("JOIN", sql.args["kind"], sql.args["on"].sql())
-        ret += get_join_path(sql.args["this"])
-    elif isinstance(sql, Group):
-        ret += ("GROUP", sql.sql())
-    elif isinstance(sql, Subquery):
-        ret += get_join_path(sql.args["this"])
-        if "alias" in sql.args:
-            ret += ("AS", sql.args["alias"].sql())
-    else:
-        ret += (sql.sql(),)
-    return ret
-
-
-def merge(sqls) -> Select:
-    if len(sqls) == 1:
-        return sqls[0]
-    new_sql = sqls[0].copy()
-
-    if isinstance(new_sql, Select):
-        exps = [sql.args["expressions"] for sql in sqls]
-        exps_set = set(exp for sublist in exps for exp in sublist)
-        new_sql.set("expressions", exps_set)
-        if "joins" in new_sql.args:
-            new_joins = []
-            for i in range(len(new_sql.args["joins"])):
-                new_joins.append(merge([sql.args["joins"][i] for sql in sqls]))
-            new_sql.set("joins", new_joins)
-    elif isinstance(new_sql, Join):
-        new_sql.set("this", merge([sql.args["this"] for sql in sqls]))
-    elif isinstance(new_sql, Subquery):
-        new_sql.set("this", merge([sql.args["this"] for sql in sqls]))
-
-    return new_sql

@@ -2,26 +2,28 @@
 SQL-based DFS engine implementation for the new interface.
 """
 
-from typing import List, Optional, Dict, Any, Tuple
-from pathlib import Path
-import pandas as pd
-import featuretools as ft
-from sql_formatter.core import format_sql
-import tqdm
-from loguru import logger
-
-from .base_engine import DFSEngine, DFSConfig, dfs_engine
-from ..dataset.rdb import RDB
-from .gen_sqls import features2sql, decode_column_from_sql
-from .duckdb_database import DuckDBBuilder
-from ..dataset.meta import RDBCutoffTime, RDBColumnDType
-
-__all__ = ['DFS2SQLEngine', 'assemble_dfs2sql_feature_frames']
-
-
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import duckdb
+import featuretools as ft
+import pandas as pd
+import tqdm
+from loguru import logger
+from sql_formatter.core import format_sql
+
+from ..dataset.meta import RDBColumnDType, RDBCutoffTime
+from ..dataset.rdb import RDB
+from .base_engine import DFSConfig, DFSEngine, dfs_engine
+from .duckdb_database import DuckDBBuilder
+from .gen_sqls import decode_column_from_sql, features2sql
+from .merge_sql import merge_queries
+
+__all__ = ['DFS2SQLEngine', 'assemble_dfs2sql_feature_frames']
 
 
 def merge_dfs2sql_feature_frames_legacy(
@@ -122,6 +124,13 @@ class DFS2SQLEngine(DFSEngine):
             logger.debug(f"Using temporary DuckDB path: {engine_path}")
             
         builder = DuckDBBuilder(Path(engine_path))
+        for setting, value in (
+            ("threads", config.dfs2sql_threads),
+            ("memory_limit", config.dfs2sql_memory_limit),
+            ("temp_directory", config.dfs2sql_temp_directory),
+        ):
+            if value is not None:
+                builder.db.execute(f"SET {setting} = ?", [value])
         self._build_database_tables(builder, rdb, target_dataframe, target_index, cutoff_time_column)
         db = builder.db
 
@@ -150,23 +159,23 @@ class DFS2SQLEngine(DFSEngine):
             include_cutoff_time=config.include_cutoff_time,
         )
 
-        # Execute SQLs and merge results (reuse existing logic)
+        column_order = list(
+            dict.fromkeys(
+                decode_column_from_sql(name)
+                for query in sqls
+                for name in query.named_selects
+                if name != cutoff_time_col_name
+            )
+        )
+        if config.dfs2sql_merge_queries:
+            sqls = merge_queries(sqls)
         logger.debug("Executing SQLs ...")
-        dataframes = []
-        for sql in tqdm.tqdm(sqls):
-            logger.debug(f"Executing SQL: {format_sql(sql.sql())}")
-            result = db.sql(sql.sql())
-            if result is not None:
-                dataframe = result.df()
-
-                # Clean up result dataframe (reuse existing logic)
-                if cutoff_time_col_name in dataframe.columns:
-                    dataframe.drop(columns=[cutoff_time_col_name], inplace=True)
-                dataframe.rename(decode_column_from_sql, axis="columns", inplace=True)
-                dataframes.append(dataframe)
-            else:
-                # SQLs that produce no result are skipped (e.g., CREATE TABLE)
-                pass
+        dataframes = self._execute_feature_sqls(
+            sqls,
+            db=db,
+            config=config,
+            cutoff_time_col_name=cutoff_time_col_name,
+        )
 
         # Assemble all feature dataframes (index-aligned concat; see ``assemble_dfs2sql_feature_frames``).
         if dataframes:
@@ -186,7 +195,11 @@ class DFS2SQLEngine(DFSEngine):
             logger.info("dfs2sql: assembly finished in {:.2f}s", time.perf_counter() - t0)
 
             columns_to_exclude = set(target_dataframe.columns) - {target_index}
-            feature_columns = [col for col in merged_df.columns if col not in columns_to_exclude]
+            feature_columns = [
+                col
+                for col in column_order
+                if col in merged_df.columns and col not in columns_to_exclude
+            ]
 
             return merged_df[feature_columns]
         else:
@@ -194,6 +207,72 @@ class DFS2SQLEngine(DFSEngine):
             logger.warning("No features generated from SQL execution.")
             # Return dataframe with just the target index to satisfy contract
             return pd.DataFrame({target_index: target_dataframe[target_index]})
+
+    def _effective_sql_workers(self, config: DFSConfig) -> int:
+        return max(1, int(getattr(config, "dfs2sql_sql_workers", 1) or 1))
+
+    @staticmethod
+    def _postprocess_sql_frame(
+        dataframe: pd.DataFrame,
+        cutoff_time_col_name: Optional[str],
+    ) -> pd.DataFrame:
+        if cutoff_time_col_name is not None and cutoff_time_col_name in dataframe.columns:
+            dataframe = dataframe.drop(columns=[cutoff_time_col_name])
+        return dataframe.rename(decode_column_from_sql, axis="columns")
+
+    def _execute_feature_sqls(
+        self,
+        sqls: List[Any],
+        *,
+        db: duckdb.DuckDBPyConnection,
+        config: DFSConfig,
+        cutoff_time_col_name: Optional[str],
+    ) -> List[pd.DataFrame]:
+        """Run concurrent queries through cursors sharing one database."""
+        workers = self._effective_sql_workers(config)
+        sql_texts = [sql.sql() for sql in sqls]
+        if workers == 1 or len(sql_texts) <= 1:
+            dataframes: List[pd.DataFrame] = []
+            for text in tqdm.tqdm(sql_texts):
+                logger.debug("Executing SQL: {}", format_sql(text))
+                result = db.sql(text)
+                if result is not None:
+                    dataframes.append(
+                        self._postprocess_sql_frame(result.df(), cutoff_time_col_name)
+                    )
+            return dataframes
+
+        logger.info(
+            "dfs2sql: executing {} SQL(s) with up to {} concurrent queries",
+            len(sql_texts),
+            workers,
+        )
+        def _run_one(item: Tuple[int, str]) -> Tuple[int, Optional[pd.DataFrame]]:
+            idx, text = item
+            logger.debug("Executing SQL[{}]: {}", idx, format_sql(text))
+            # A cursor shares the database even when it has no backing file.
+            connection = db.cursor()
+            try:
+                result = connection.sql(text)
+                frame = (
+                    None
+                    if result is None
+                    else self._postprocess_sql_frame(result.df(), cutoff_time_col_name)
+                )
+                return idx, frame
+            finally:
+                connection.close()
+
+        slots: List[Optional[pd.DataFrame]] = [None] * len(sql_texts)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_run_one, (i, text)) for i, text in enumerate(sql_texts)
+            ]
+            for fut in tqdm.tqdm(as_completed(futures), total=len(futures)):
+                idx, frame = fut.result()
+                slots[idx] = frame
+
+        return [frame for frame in slots if frame is not None]
 
     def _build_database_tables(
         self,

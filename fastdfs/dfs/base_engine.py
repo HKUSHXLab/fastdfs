@@ -118,6 +118,11 @@ class DFSConfig(pydantic.BaseModel):
         n_jobs: Number of parallel jobs for computation
         dfs2sql_concat_chunk_size: dfs2sql only — number of per-feature SQL frames to concat per
             intermediate block when assembling the wide matrix (default 512).
+        dfs2sql_sql_workers: Number of concurrent queries sharing one DuckDB database.
+        dfs2sql_merge_queries: Merge compatible feature projections before execution.
+        dfs2sql_threads: Global DuckDB thread count, independent of worker count.
+        dfs2sql_memory_limit: DuckDB memory limit; does not limit total process memory.
+        dfs2sql_temp_directory: Directory for DuckDB spill files.
         include_cutoff_time: When True, include RDB rows whose time equals the task cutoff
             (``<=`` in dfs2sql; featuretools ``include_cutoff_time=True``). Default False keeps
             strict ``<`` for other datasets.
@@ -142,6 +147,12 @@ class DFSConfig(pydantic.BaseModel):
     # dfs2sql: when stitching one DuckDB result per feature, concat this many skinny frames
     # at a time before a final horizontal concat (memory vs overhead tradeoff).
     dfs2sql_concat_chunk_size: int = 512
+    # Concurrent queries share one DuckDB database.
+    dfs2sql_sql_workers: int = 1
+    dfs2sql_merge_queries: bool = True
+    dfs2sql_threads: Optional[int] = pydantic.Field(default=None, ge=1)
+    dfs2sql_memory_limit: Optional[str] = None
+    dfs2sql_temp_directory: Optional[str] = None
     include_cutoff_time: bool = False
 
 
