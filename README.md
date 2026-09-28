@@ -37,9 +37,26 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,
     key_mappings=key_mappings,
     cutoff_time_column="interaction_time",
-    config_overrides={"engine": "dfs2sql", "dfs2sql_sql_workers": 4},
+    config_overrides={
+        "engine": "dfs2sql",
+        "engine_path": ":memory:",
+        "dfs2sql_sql_workers": 2,
+        "dfs2sql_threads": 8,
+        "dfs2sql_memory_limit": "4GB",
+    },
 )
 ```
+
+Workers share one database, including when `engine_path=":memory:"`.
+The worker count controls concurrent queries; `dfs2sql_threads` controls DuckDB's
+global thread budget. More workers can use more memory and are not always faster.
+Start with one worker when memory is limited.
+
+Compatible feature queries share projections by default. Set
+`dfs2sql_merge_queries=False` to execute them separately. DuckDB resource settings
+default to its own defaults; `dfs2sql_temp_directory` sets the spill directory.
+The DuckDB memory limit does not limit pandas frames or total process memory.
+Parallel floating-point aggregation and tied MODE values can differ between runs.
 
 ### Speedup vs sequential (n=10k, depth=4, workers=4)
 
