@@ -196,6 +196,7 @@ class DFSConfig(pydantic.BaseModel):
 - `max_features` (int): Maximum number of features to generate (-1 for unlimited)
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation
+- `schema_only_entityset` (bool): If `True`, Featuretools planning registers **0-row** RDB frames (schema/dtypes only) instead of full tables. Feature **values** are still computed from full data (e.g. via DuckDB). Default `False`.
 
 **Aggregation primitives:** See **[Aggregation Primitives](aggregation_primitives.md)** for defaults, FastDFS-specific primitives (`quantile_25`, `quantile_75`, `discrete_entropy`), dfs2sql vs featuretools support, SQL mappings, and categorical encoding notes.
 

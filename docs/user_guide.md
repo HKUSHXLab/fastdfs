@@ -442,7 +442,9 @@ config = fastdfs.DFSConfig(
     agg_primitives=["count", "mean", "max", "min", "std", "sum"],
     max_depth=3,                    # How deep to traverse relationships
     use_cutoff_time=True,          # Enable temporal consistency
-    engine="dfs2sql"               # Choose engine: "featuretools" or "dfs2sql"
+    engine="dfs2sql",              # Choose engine: "featuretools" or "dfs2sql"
+    # Optional: speed up Featuretools planning on large RDBs (values still use full data)
+    schema_only_entityset=True,
 )
 
 features = fastdfs.compute_dfs_features(
