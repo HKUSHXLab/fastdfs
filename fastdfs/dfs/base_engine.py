@@ -7,6 +7,7 @@ target dataframes and simplified RDB datasets, removing the dependency on tasks.
 
 import abc
 from typing import Dict, List, Optional, Any, Tuple
+import time
 import pandas as pd
 import featuretools as ft
 import numpy as np
@@ -154,6 +155,9 @@ class DFSConfig(pydantic.BaseModel):
     dfs2sql_memory_limit: Optional[str] = None
     dfs2sql_temp_directory: Optional[str] = None
     include_cutoff_time: bool = False
+    # Featuretools EntitySet: register 0-row schema frames instead of full RDB tables.
+    # Values are still computed from full tables via DuckDB; this only affects planning.
+    schema_only_entityset: bool = False
 
 
 class DFSEngine:
@@ -230,7 +234,21 @@ class DFSEngine:
         target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
 
         # Phase 1: Feature preparation (common logic in base class)
+        t_plan0 = time.perf_counter()
         features = self.prepare_features(rdb, target_df_for_engine, key_mappings, cutoff_time_column, config)
+        plan_s = time.perf_counter() - t_plan0
+        self.last_plan_stats = {
+            "plan_s": plan_s,
+            "n_features": len(features),
+            "schema_only_entityset": bool(getattr(config, "schema_only_entityset", False)),
+            "feature_names": [f.get_name() for f in features],
+        }
+        logger.info(
+            "prepare_features: {:.2f}s n_features={} schema_only_entityset={}",
+            plan_s,
+            len(features),
+            self.last_plan_stats["schema_only_entityset"],
+        )
 
         if len(features) == 0:
             logger.warning("No features generated, check your configuration or data.")
@@ -315,7 +333,7 @@ class DFSEngine:
             return all_features
         
         # Single key mapping - standard DFS logic
-        entity_set = self._build_entity_set_from_rdb(rdb)
+        entity_set = self._build_entity_set_from_rdb(rdb, config)
 
         target_entity_name = "__target__"
         target_index = "__target_index__"
@@ -355,14 +373,21 @@ class DFSEngine:
 
         return filtered_features
 
-    def _build_entity_set_from_rdb(self, rdb: RDB) -> ft.EntitySet:
+    def _build_entity_set_from_rdb(
+        self, rdb: RDB, config: Optional[DFSConfig] = None
+    ) -> ft.EntitySet:
         """Build EntitySet from RDB tables only (adapted from existing build_dataframes logic)."""
 
         entity_set = ft.EntitySet(id=rdb.metadata.name)
+        cfg = config if config is not None else self.config
+        schema_only = bool(getattr(cfg, "schema_only_entityset", False))
 
         # Add all RDB tables as entities
         for table_name in rdb.table_names:
-            df = rdb.get_table(table_name)
+            df_full = rdb.get_table(table_name)
+            # Schema-only planning: Woodwork/Featuretools only need columns + types.
+            # Keep a 0-row frame with identical dtypes; values still come from DuckDB.
+            df = df_full.iloc[:0].copy() if schema_only else df_full
             table_meta = rdb.get_table_metadata(table_name)
 
             # Parse columns and build logical types/semantic tags (reuse existing logic)
@@ -384,7 +409,11 @@ class DFSEngine:
 
             # Add default index if needed
             if index_col is None:
-                df["__index__"] = np.arange(len(df))
+                if schema_only:
+                    df = df.copy()
+                    df["__index__"] = pd.Series(dtype="int64")
+                else:
+                    df["__index__"] = np.arange(len(df))
                 index_col = "__index__"
 
             entity_set = entity_set.add_dataframe(

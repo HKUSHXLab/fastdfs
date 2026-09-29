@@ -104,25 +104,13 @@ class DFS2SQLEngine(DFSEngine):
 
     name = "dfs2sql"
 
-    def compute_feature_matrix(
-        self,
-        rdb: RDB,
-        target_dataframe: pd.DataFrame,
-        key_mappings: Dict[str, str],
-        cutoff_time_column: Optional[str],
-        features: List[ft.FeatureBase],
-        config: DFSConfig
-    ) -> pd.DataFrame:
-        """Compute feature values using SQL generation (reuse existing computation logic)."""
-        # Set up database with RDB tables + target table
-        target_index = "__target_index__"  # Target index is already handled by base class
-        
+    def open_builder(self, config: DFSConfig) -> Tuple[DuckDBBuilder, str]:
+        """Create a DuckDB builder/connection for dfs2sql (caller owns lifecycle)."""
         engine_path = config.engine_path
         if engine_path is None:
-            # Generate a random temporary file path if not specified
             engine_path = str(Path(tempfile.gettempdir()) / f"fastdfs_{uuid.uuid4()}.db")
             logger.debug(f"Using temporary DuckDB path: {engine_path}")
-            
+
         builder = DuckDBBuilder(Path(engine_path))
         for setting, value in (
             ("threads", config.dfs2sql_threads),
@@ -131,10 +119,71 @@ class DFS2SQLEngine(DFSEngine):
         ):
             if value is not None:
                 builder.db.execute(f"SET {setting} = ?", [value])
-        self._build_database_tables(builder, rdb, target_dataframe, target_index, cutoff_time_column)
-        db = builder.db
+        return builder, engine_path
 
-        # Generate SQLs from feature specifications (reuse existing features2sql logic)
+    def ingest_rdb_tables(self, builder: DuckDBBuilder, rdb: RDB) -> None:
+        """Load all RDB tables into DuckDB (once per warm session)."""
+        for table_name in rdb.table_names:
+            df = rdb.get_table(table_name)
+            table_meta = rdb.get_table_metadata(table_name)
+
+            for col_schema in table_meta.columns:
+                if col_schema.name in df.columns:
+                    if col_schema.dtype == RDBColumnDType.float_t:
+                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
+                    elif col_schema.dtype == RDBColumnDType.datetime_t:
+                        df[col_schema.name] = pd.to_datetime(df[col_schema.name], errors='coerce')
+                    elif col_schema.dtype == RDBColumnDType.timestamp_t:
+                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
+
+            index_col = self._get_table_index(table_meta)
+            if index_col == "__index__" and "__index__" not in df.columns:
+                df = df.copy(deep=False)
+                df["__index__"] = range(len(df))
+
+            builder.add_dataframe(
+                dataframe_name=table_name,
+                dataframe=df,
+                index=index_col,
+                time_index=table_meta.time_column,
+            )
+
+    def ingest_or_replace_target(
+        self,
+        builder: DuckDBBuilder,
+        target_dataframe: pd.DataFrame,
+        target_index: str,
+        cutoff_time_column: Optional[str],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Load or replace ``__target__`` (+ cutoff helper) for the current split."""
+        builder.add_dataframe(
+            dataframe_name="__target__",
+            dataframe=target_dataframe,
+            index=target_index,
+            time_index=cutoff_time_column,
+            replace=replace,
+        )
+        builder.index_name = target_index
+        builder.index = target_dataframe[target_index].values
+
+        if cutoff_time_column:
+            cutoff_time = target_dataframe[[target_index, cutoff_time_column]].copy()
+            cutoff_time.columns = [target_index, RDBCutoffTime.column_name.value]
+            builder.set_cutoff_time(cutoff_time, replace=replace)
+
+    def plan_feature_sqls(
+        self,
+        builder: DuckDBBuilder,
+        rdb: RDB,
+        target_dataframe: pd.DataFrame,
+        features: List[ft.FeatureBase],
+        cutoff_time_column: Optional[str],
+        config: DFSConfig,
+    ) -> Tuple[List[Any], List[str], Optional[str]]:
+        """Compile Featuretools features to (optionally merged) SQL queries."""
+        target_index = "__target_index__"
         has_cutoff_time = config.use_cutoff_time and cutoff_time_column is not None
         if has_cutoff_time:
             time_columns = builder.time_columns
@@ -145,9 +194,7 @@ class DFS2SQLEngine(DFSEngine):
             cutoff_time_table_name = None
             cutoff_time_col_name = None
 
-        # Build column type map from RDB tables for boolean detection
         column_type_map = self._build_column_type_map(rdb, target_dataframe)
-
         sqls = features2sql(
             features,
             target_index,
@@ -158,7 +205,6 @@ class DFS2SQLEngine(DFSEngine):
             column_type_map=column_type_map,
             include_cutoff_time=config.include_cutoff_time,
         )
-
         column_order = list(
             dict.fromkeys(
                 decode_column_from_sql(name)
@@ -169,6 +215,20 @@ class DFS2SQLEngine(DFSEngine):
         )
         if config.dfs2sql_merge_queries:
             sqls = merge_queries(sqls)
+        return sqls, column_order, cutoff_time_col_name
+
+    def execute_and_assemble(
+        self,
+        sqls: List[Any],
+        *,
+        db: duckdb.DuckDBPyConnection,
+        target_dataframe: pd.DataFrame,
+        column_order: List[str],
+        config: DFSConfig,
+        cutoff_time_col_name: Optional[str],
+    ) -> pd.DataFrame:
+        """Run frozen SQLs and stitch results into a feature matrix keyed by target index."""
+        target_index = "__target_index__"
         logger.debug("Executing SQLs ...")
         dataframes = self._execute_feature_sqls(
             sqls,
@@ -176,37 +236,65 @@ class DFS2SQLEngine(DFSEngine):
             config=config,
             cutoff_time_col_name=cutoff_time_col_name,
         )
-
-        # Assemble all feature dataframes (index-aligned concat; see ``assemble_dfs2sql_feature_frames``).
-        if dataframes:
-            canonical_index = pd.Index(target_dataframe[target_index].values, name=target_index)
-            t0 = time.perf_counter()
-            logger.info(
-                "dfs2sql: assembling {} feature frame(s) via concat (chunk_size={}) …",
-                len(dataframes),
-                config.dfs2sql_concat_chunk_size,
-            )
-            merged_df = assemble_dfs2sql_feature_frames(
-                dataframes,
-                target_index,
-                canonical_index,
-                concat_chunk_size=config.dfs2sql_concat_chunk_size,
-            )
-            logger.info("dfs2sql: assembly finished in {:.2f}s", time.perf_counter() - t0)
-
-            columns_to_exclude = set(target_dataframe.columns) - {target_index}
-            feature_columns = [
-                col
-                for col in column_order
-                if col in merged_df.columns and col not in columns_to_exclude
-            ]
-
-            return merged_df[feature_columns]
-        else:
-            # No features generated
+        if not dataframes:
             logger.warning("No features generated from SQL execution.")
-            # Return dataframe with just the target index to satisfy contract
             return pd.DataFrame({target_index: target_dataframe[target_index]})
+
+        canonical_index = pd.Index(target_dataframe[target_index].values, name=target_index)
+        t0 = time.perf_counter()
+        logger.info(
+            "dfs2sql: assembling {} feature frame(s) via concat (chunk_size={}) …",
+            len(dataframes),
+            config.dfs2sql_concat_chunk_size,
+        )
+        merged_df = assemble_dfs2sql_feature_frames(
+            dataframes,
+            target_index,
+            canonical_index,
+            concat_chunk_size=config.dfs2sql_concat_chunk_size,
+        )
+        logger.info("dfs2sql: assembly finished in {:.2f}s", time.perf_counter() - t0)
+
+        columns_to_exclude = set(target_dataframe.columns) - {target_index}
+        feature_columns = [
+            col
+            for col in column_order
+            if col in merged_df.columns and col not in columns_to_exclude
+        ]
+        return merged_df[feature_columns]
+
+    def compute_feature_matrix(
+        self,
+        rdb: RDB,
+        target_dataframe: pd.DataFrame,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str],
+        features: List[ft.FeatureBase],
+        config: DFSConfig
+    ) -> pd.DataFrame:
+        """Compute feature values using SQL generation (one-shot; opens a fresh DuckDB)."""
+        target_index = "__target_index__"
+        builder, _engine_path = self.open_builder(config)
+        try:
+            self._build_database_tables(
+                builder, rdb, target_dataframe, target_index, cutoff_time_column
+            )
+            sqls, column_order, cutoff_time_col_name = self.plan_feature_sqls(
+                builder, rdb, target_dataframe, features, cutoff_time_column, config
+            )
+            return self.execute_and_assemble(
+                sqls,
+                db=builder.db,
+                target_dataframe=target_dataframe,
+                column_order=column_order,
+                config=config,
+                cutoff_time_col_name=cutoff_time_col_name,
+            )
+        finally:
+            try:
+                builder.db.close()
+            except Exception:
+                pass
 
     def _effective_sql_workers(self, config: DFSConfig) -> int:
         return max(1, int(getattr(config, "dfs2sql_sql_workers", 1) or 1))
@@ -283,57 +371,10 @@ class DFS2SQLEngine(DFSEngine):
         cutoff_time_column: Optional[str]
     ):
         """Build database tables for SQL execution (adapted from existing build_dataframes logic)."""
-
-        # Add all RDB tables to database
-        for table_name in rdb.table_names:
-            df = rdb.get_table(table_name)
-            table_meta = rdb.get_table_metadata(table_name)
-
-            # Enforce types based on metadata to avoid DuckDB inferring VARCHAR for numeric columns
-            for col_schema in table_meta.columns:
-                if col_schema.name in df.columns:
-                    if col_schema.dtype == RDBColumnDType.float_t:
-                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
-                    elif col_schema.dtype == RDBColumnDType.datetime_t:
-                        df[col_schema.name] = pd.to_datetime(df[col_schema.name], errors='coerce')
-                    elif col_schema.dtype == RDBColumnDType.timestamp_t:
-                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
-
-            # Get the appropriate index column
-            index_col = self._get_table_index(table_meta)
-
-            # Add __index__ column if it doesn't have a primary key (shallow copy for new columns)
-            if index_col == "__index__" and "__index__" not in df.columns:
-                df = df.copy(deep=False)  # Shallow copy - shares data but allows new columns
-                df["__index__"] = range(len(df))
-
-            # Add table to database
-            builder.add_dataframe(
-                dataframe_name=table_name,
-                dataframe=df,
-                index=index_col,
-                time_index=table_meta.time_column
-            )
-
-        # Add target dataframe as __target__ table (target_index is already in dataframe)
-        target_df_for_db = target_dataframe
-
-        builder.add_dataframe(
-            dataframe_name="__target__",
-            dataframe=target_df_for_db,
-            index=target_index,
-            time_index=cutoff_time_column
+        self.ingest_rdb_tables(builder, rdb)
+        self.ingest_or_replace_target(
+            builder, target_dataframe, target_index, cutoff_time_column, replace=False
         )
-
-        builder.index_name = target_index
-        builder.index = target_df_for_db[target_index].values
-
-        # Set up cutoff time information
-        if cutoff_time_column:
-            # Create cutoff time dataframe with only necessary columns
-            cutoff_time = target_df_for_db[[target_index, cutoff_time_column]]
-            cutoff_time.columns = [target_index, RDBCutoffTime.column_name.value]
-            builder.set_cutoff_time(cutoff_time)
 
     def _get_table_index(self, table_meta) -> str:
         """Get the primary key column for a table."""

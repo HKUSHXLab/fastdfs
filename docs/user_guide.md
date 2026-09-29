@@ -318,25 +318,26 @@ features = fastdfs.compute_dfs_features(
 
 ### Working with Different Target DataFrames
 
-FastDFS can augment any dataframe, not just data from your RDB:
+FastDFS can augment any dataframe, not just data from your RDB. When the **RDB is shared** across train/val/test (same keys and cutoff column), use a **`DFSSession`** so Featuretools planning and DuckDB RDB ingest run once:
 
 ```python
-# Training data
-train_df = pd.read_csv("train.csv")
-train_features = fastdfs.compute_dfs_features(rdb, train_df, key_mappings)
+config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
 
-# Test data  
-test_df = pd.read_csv("test.csv")
-test_features = fastdfs.compute_dfs_features(rdb, test_df, key_mappings)
+with fastdfs.create_dfs_session(
+    rdb,
+    key_mappings,
+    cutoff_time_column="timestamp",
+    config=config,
+) as session:
+    train_features = session.compute(train_df)   # plan + ingest RDB + compute
+    test_features = session.compute(test_df)     # reuse plan + RDB; replace target only
+    new_features = session.compute(new_data)
 
-# New prediction instances
-new_data = pd.DataFrame({
-    "user_id": ["u999"],
-    "item_id": ["i888"], 
-    "prediction_time": ["2024-12-01"]
-})
-new_features = fastdfs.compute_dfs_features(rdb, new_data, key_mappings)
+# Single-shot (no reuse) still works:
+# features = fastdfs.compute_dfs_features(rdb, target_df, key_mappings, ...)
 ```
+
+`DFSSession` currently requires `engine="dfs2sql"`. Feature column order is frozen after the first `compute` / `prepare`.
 
 ## Transform Pipeline
 
@@ -442,7 +443,9 @@ config = fastdfs.DFSConfig(
     agg_primitives=["count", "mean", "max", "min", "std", "sum"],
     max_depth=3,                    # How deep to traverse relationships
     use_cutoff_time=True,          # Enable temporal consistency
-    engine="dfs2sql"               # Choose engine: "featuretools" or "dfs2sql"
+    engine="dfs2sql",              # Choose engine: "featuretools" or "dfs2sql"
+    # Optional: speed up Featuretools planning on large RDBs (values still use full data)
+    schema_only_entityset=True,
 )
 
 features = fastdfs.compute_dfs_features(
@@ -523,47 +526,52 @@ train_features = fastdfs.compute_dfs_features(
 
 ### 2. Handling Train/Test Splits
 
-Apply transforms to RDB once, then generate features separately:
+Apply transforms to the RDB once, then reuse a **session** across splits (same keys / cutoff):
 
 ```python
 # Clean RDB once
 clean_rdb = transform_pipeline(rdb)
 
-# Generate features for each split with proper cutoffs
-train_features = fastdfs.compute_dfs_features(
-    rdb=clean_rdb,
-    target_dataframe=train_df,
-    key_mappings=key_mappings,
-    cutoff_time_column="timestamp"
-)
-
-test_features = fastdfs.compute_dfs_features(
-    rdb=clean_rdb, 
-    target_dataframe=test_df,
-    key_mappings=key_mappings,
-    cutoff_time_column="timestamp"
-)
+config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
+with fastdfs.create_dfs_session(
+    clean_rdb,
+    key_mappings,
+    cutoff_time_column="timestamp",
+    config=config,
+) as session:
+    train_features = session.compute(train_df)
+    test_features = session.compute(test_df)
 ```
+
+This avoids repeating Featuretools planning and DuckDB ingest of the full RDB on every split. For a one-off matrix, `compute_dfs_features` is fine.
 
 ### 3. Performance Optimization
 
 **For large datasets**:
 - Use `engine="dfs2sql"` for better performance
+- Use `create_dfs_session` when computing train/val/test on the same RDB
+- Consider `schema_only_entityset=True` to speed up Featuretools planning
 - Start with `max_depth=1` and increase gradually
 - Filter columns before DFS to reduce computation
 
 ```python
-# Optimize for large data
+# Optimize for large data + multi-split
 config = fastdfs.DFSConfig(
     engine="dfs2sql",
+    engine_path=":memory:",
     max_depth=1,  # Start shallow
-    agg_primitives=["count", "mean"]  # Use fewer primitives
+    agg_primitives=["count", "mean"],  # Use fewer primitives
+    schema_only_entityset=True,
 )
+with fastdfs.create_dfs_session(rdb, key_mappings, cutoff_time_column="timestamp", config=config) as session:
+    train_features = session.compute(train_df)
+    val_features = session.compute(val_df)
 ```
 
 **For small datasets**:
 - `engine="featuretools"` provides richer features
 - Higher `max_depth` values are feasible
+- One-shot `compute_dfs_features` is enough when you only need a single matrix
 
 ### 4. Feature Selection
 
