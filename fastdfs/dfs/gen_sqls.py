@@ -17,6 +17,8 @@ from sqlglot.expressions import (
     Identifier,
     Cast,
     Literal,
+    Count,
+    Distinct,
 )
 import sqlglot
 from typing import Tuple, Dict, Optional, List
@@ -451,6 +453,9 @@ class FeatureBlock:
             # It calculates: -SUM(p * LOG2(p)) where p = count/total
             # Handles NULL values automatically (ignores them)
             return Anonymous(this="entropy", expressions=[source_column])
+        elif self._group_by_primitive.name == "num_unique":
+            # Featuretools name; DuckDB has no num_unique() — use COUNT(DISTINCT …).
+            return Count(this=Distinct(expressions=[source_column]))
         elif self._group_by_primitive.name.startswith("quantile_"):
             # Handle quantile primitives: quantile_25, quantile_75, etc.
             # Extract quantile value from primitive name (e.g., "quantile_25" -> 0.25)

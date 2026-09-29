@@ -11,11 +11,20 @@ from pathlib import Path
 from loguru import logger
 
 from .dfs import DFSConfig, get_dfs_engine
+from .dfs.session import DFSSession, DFSSessionError, create_dfs_session
 from .dataset.rdb import RDB
 from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat, RDBColumnDType
 from .transform.infer_schema import InferSchemaTransform
 
-__all__ = ['load_rdb', 'create_rdb', 'compute_dfs_features', 'DFSPipeline']
+__all__ = [
+    'load_rdb',
+    'create_rdb',
+    'compute_dfs_features',
+    'DFSPipeline',
+    'DFSSession',
+    'DFSSessionError',
+    'create_dfs_session',
+]
 
 
 def load_rdb(path: str) -> RDB:
