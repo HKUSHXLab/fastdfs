@@ -469,8 +469,12 @@ class TestDFS2SQLEngine:
         assert len(result_df) == len(target_dataframe)
 
     def test_num_unique_primitive(self):
-        """num_unique should compile to COUNT(DISTINCT ...) and ignore NULLs like pandas nunique."""
-        users = pd.DataFrame({"user_id": [1, 2, 3]})
+        """num_unique should compile to COUNT(DISTINCT ...) and ignore NULLs like pandas nunique.
+
+        A target row without child rows gets 0, like count, so the column is int64 whether
+        or not such rows exist and the dtype does not depend on the split.
+        """
+        users = pd.DataFrame({"user_id": [1, 2, 3, 4]})
         events = pd.DataFrame({
             "event_id": [10, 11, 12, 13, 14, 15, 16],
             "user_id": [1, 1, 1, 2, 2, 3, 3],
@@ -488,15 +492,27 @@ class TestDFS2SQLEngine:
             agg_primitives=["num_unique"],
         )
 
-        result_df = compute_dfs_features(
+        column = "d2__user.NUM_UNIQUE(event.kind)"
+        expected = events.groupby("user_id")["kind"].nunique()
+
+        with_events = compute_dfs_features(
             rdb,
             pd.DataFrame({"user_id": [1, 2, 3]}),
             key_mappings={"user_id": "user.user_id"},
             config=config,
         )
+        assert with_events[column].dtype == "int64"
+        assert with_events[column].tolist() == expected.loc[[1, 2, 3]].tolist()
 
-        expected = events.groupby("user_id")["kind"].nunique()
-        assert result_df["d2__user.NUM_UNIQUE(event.kind)"].tolist() == expected.loc[[1, 2, 3]].tolist()
+        # User 4 has no events.
+        without_events = compute_dfs_features(
+            rdb,
+            pd.DataFrame({"user_id": [1, 4]}),
+            key_mappings={"user_id": "user.user_id"},
+            config=config,
+        )
+        assert without_events[column].dtype == "int64"
+        assert without_events[column].tolist() == [expected.loc[1], 0]
 
     def test_temp_db_file_removed_after_compute(self, tmp_path, monkeypatch):
         """Without engine_path, the generated temp DuckDB file is deleted after one-shot compute."""

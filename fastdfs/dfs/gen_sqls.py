@@ -255,10 +255,11 @@ class FeatureBlock:
             )
 
         def _coalesce(col):
-            # If next aggregation primitive is count, then we need to coalesce the column to 0.
+            # If next aggregation primitive is count or num_unique, coalesce the column to 0:
+            # no child rows means zero (distinct) values, and the column stays int64.
             if (
                 self._descendant_group_by_primitive is None
-                or self._descendant_group_by_primitive.name != "count"
+                or self._descendant_group_by_primitive.name not in ("count", "num_unique")
             ):
                 return col, None
             return Coalesce(this=col, expressions="0"), col.this
