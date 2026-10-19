@@ -63,7 +63,8 @@ class DFSSession:
         self._engine: DFS2SQLEngine = get_dfs_engine("dfs2sql", effective)  # type: ignore[assignment]
 
         self._builder: Optional[DuckDBBuilder] = None
-        self._engine_path: Optional[str] = None
+        # Set only when the session generated the DB path itself; close() deletes it.
+        self._temp_db_path: Optional[str] = None
         self._features: Optional[List[Any]] = None
         self._sqls: Optional[List[Any]] = None
         self._sql_column_order: Optional[List[str]] = None
@@ -87,7 +88,11 @@ class DFSSession:
         self.close()
 
     def close(self) -> None:
-        """Release DuckDB connection and delete temp DB file when applicable."""
+        """Release the DuckDB connection.
+
+        Deletes the DB file only if the session generated a temporary path
+        (``config.engine_path`` is ``None``); a user-supplied path is kept.
+        """
         if self._closed:
             return
         self._closed = True
@@ -97,13 +102,13 @@ class DFSSession:
             except Exception as exc:
                 logger.debug("DFSSession: error closing DuckDB: {}", exc)
             self._builder = None
-        path = self._engine_path
-        if path and path != ":memory:" and os.path.exists(path):
+        path = self._temp_db_path
+        if path and os.path.exists(path):
             try:
                 os.remove(path)
             except OSError as exc:
-                logger.debug("DFSSession: could not remove db file {}: {}", path, exc)
-        self._engine_path = None
+                logger.debug("DFSSession: could not remove temp db file {}: {}", path, exc)
+        self._temp_db_path = None
 
     def prepare(self, target_schema: pd.DataFrame) -> None:
         """Plan features and ingest RDB (+ schema target) without returning a matrix.
@@ -242,7 +247,8 @@ class DFSSession:
 
         builder, engine_path = self._engine.open_builder(self._config)
         self._builder = builder
-        self._engine_path = engine_path
+        if self._config.engine_path is None:
+            self._temp_db_path = engine_path
         self._engine.ingest_rdb_tables(builder, self._rdb)
         self._ingest_target(target_df_for_engine)
 

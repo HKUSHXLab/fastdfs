@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 import pytest
 
@@ -202,3 +204,30 @@ def test_session_zero_features_matches_oneshot(
 
     assert list(train_out.columns) == list(train_target.columns)
     pd.testing.assert_frame_equal(val_out, oneshot_val)
+
+
+def test_session_close_keeps_user_engine_path(tmp_path, tiny_rdb, dfs_config, train_target):
+    db_path = tmp_path / "my.db"
+    config = dfs_config.model_copy(update={"engine_path": str(db_path)})
+    with DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    ) as session:
+        session.compute(train_target.copy())
+    assert db_path.exists()
+
+
+def test_session_close_removes_temp_engine_path(tiny_rdb, dfs_config, train_target):
+    config = dfs_config.model_copy(update={"engine_path": None})
+    with DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    ) as session:
+        session.compute(train_target.copy())
+        temp_path = session._temp_db_path
+        assert temp_path is not None and os.path.exists(temp_path)
+    assert not os.path.exists(temp_path)
