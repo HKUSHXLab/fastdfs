@@ -162,9 +162,11 @@ class DFS2SQLEngine(DFSEngine):
                     elif col_schema.dtype == RDBColumnDType.category_t:
                         # Same conversion woodwork applies to Categorical columns during full
                         # planning, so DuckDB loads ENUM regardless of schema_only_entityset.
-                        # Primary/foreign keys are deliberately left as strings: they are only
+                        # Primary/foreign keys are deliberately not converted here: they are only
                         # join columns, never feature values, and converting high-cardinality
-                        # keys to category is expensive.
+                        # keys to category is expensive. They stay strings (VARCHAR) with
+                        # schema_only_entityset=True; full planning still turns them into
+                        # category (ENUM) in place, as before. Feature output is the same.
                         if not isinstance(df[col_schema.name].dtype, pd.CategoricalDtype):
                             df[col_schema.name] = df[col_schema.name].astype("category")
 
