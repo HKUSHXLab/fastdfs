@@ -140,7 +140,6 @@ class DFSSession:
     feature_columns_: Optional[List[str]]
     n_features_: int
 
-    def prepare(self, target_schema: pd.DataFrame) -> None: ...
     def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame: ...
     def close(self) -> None: ...
 ```
@@ -151,7 +150,7 @@ Call `compute(target_df)` per split; call `close()` (or use the session as a con
 
 **Notes:**
 - Requires `engine="dfs2sql"` (raises `DFSSessionError` otherwise).
-- First `compute` (or `prepare`) freezes the Featuretools feature list, SQL, and DuckDB RDB tables.
+- The first `compute` freezes the Featuretools feature list, SQL, and DuckDB RDB tables.
 - Later `compute` calls only replace the target/cutoff tables, then re-run SQL + assembly.
 - Feature column order is stable across splits after the first successful compute.
 

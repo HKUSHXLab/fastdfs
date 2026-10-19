@@ -110,26 +110,6 @@ def test_session_rejects_non_dfs2sql(tiny_rdb, train_target):
         )
 
 
-def test_session_prepare_then_compute(
-    tiny_rdb, dfs_config, train_target, val_target
-):
-    with DFSSession(
-        tiny_rdb,
-        {"user_id": "user.user_id"},
-        cutoff_time_column="timestamp",
-        config=dfs_config,
-    ) as session:
-        session.prepare(train_target.copy())
-        assert session.n_plan_calls == 1
-        assert session.n_target_ingest_calls == 1
-
-        train_out = session.compute(train_target.copy())
-        val_out = session.compute(val_target.copy())
-        assert session.n_plan_calls == 1
-        assert session.n_target_ingest_calls == 3
-        assert list(train_out.columns) == list(val_out.columns)
-
-
 def test_session_val_matches_oneshot_val(
     tiny_rdb, dfs_config, train_target, val_target
 ):

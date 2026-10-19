@@ -28,11 +28,11 @@ class DFSSessionError(RuntimeError):
 class DFSSession:
     """Reuse Featuretools plan + DuckDB RDB tables across train/val/test targets.
 
-    First ``compute`` (or ``prepare``) freezes the feature list, SQL, and RDB
+    The first ``compute`` freezes the feature list, SQL, and RDB
     ingest. Later ``compute`` calls only replace ``__target__`` / cutoff tables,
     re-execute SQL, and assemble. Column order is fixed after the first success.
 
-    The RDB is snapshotted into DuckDB on the first ``compute`` (or ``prepare``);
+    The RDB is snapshotted into DuckDB on the first ``compute``;
     later changes to ``rdb`` are not reflected.
     """
 
@@ -110,22 +110,10 @@ class DFSSession:
                 logger.debug("DFSSession: could not remove temp db file {}: {}", path, exc)
         self._temp_db_path = None
 
-    def prepare(self, target_schema: pd.DataFrame) -> None:
-        """Plan features and ingest RDB (+ schema target) without returning a matrix.
-
-        ``target_schema`` must include key / cutoff columns; values may be empty or a
-        small sample — used for dtypes and Featuretools EntitySet target registration.
-        """
-        self._ensure_open()
-        if self._prepared:
-            return
-        _, target_df_for_engine = self._prepare_target_frame(target_schema)
-        self._plan_and_ingest_rdb(target_df_for_engine)
-
     def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame:
         """Compute DFS features for one target frame, reusing warm state when available.
 
-        Once the session is prepared, an empty target still returns the frozen
+        After the first compute, an empty target still returns the frozen
         feature columns (with zero rows), so every split has the same columns.
         """
         self._ensure_open()
@@ -237,7 +225,7 @@ class DFSSession:
         self.n_plan_calls += 1
         self._features = features
         logger.info(
-            "DFSSession: planned {} features (prepare call #{})",
+            "DFSSession: planned {} features (plan call #{})",
             len(features),
             self.n_plan_calls,
         )
