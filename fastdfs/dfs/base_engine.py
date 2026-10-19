@@ -250,7 +250,7 @@ class DFSEngine:
             DataFrame with original target_dataframe data plus generated features
         """
         # Merge config overrides
-        effective_config = self.config.copy(deep=True)
+        effective_config = self.config.model_copy(deep=True)
         if config_overrides:
             for key, value in config_overrides.items():
                 if hasattr(effective_config, key):

@@ -45,7 +45,7 @@ class DFSSession:
     ):
         if config is None:
             config = DFSConfig()
-        effective = config.copy(deep=True)
+        effective = config.model_copy(deep=True)
 
         if effective.engine != "dfs2sql":
             raise DFSSessionError(
