@@ -104,6 +104,7 @@ class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
 
     name = "dfs2sql"
+    supports_schema_only_entityset = True
 
     def open_builder(self, config: DFSConfig) -> Tuple[DuckDBBuilder, str]:
         """Create a DuckDB builder/connection for dfs2sql (caller owns lifecycle)."""

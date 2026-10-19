@@ -213,11 +213,16 @@ class DFSConfig(pydantic.BaseModel):
     include_cutoff_time: bool = False
     # Featuretools EntitySet: register 0-row schema frames instead of full RDB tables.
     # Values are still computed from full tables via DuckDB; this only affects planning.
+    # Requires engine="dfs2sql" (featuretools computes values from the EntitySet itself).
     schema_only_entityset: bool = False
 
 
 class DFSEngine:
     """Base class for DFS computation engines."""
+
+    # Whether values are computed outside the Featuretools EntitySet, so planning
+    # may use schema-only (0-row) frames.
+    supports_schema_only_entityset = False
 
     def __init__(self, config: DFSConfig):
         self.config = config
@@ -264,6 +269,12 @@ class DFSEngine:
         config: DFSConfig
     ) -> pd.DataFrame:
         """Implementation-specific feature computation."""
+
+        if config.schema_only_entityset and not self.supports_schema_only_entityset:
+            raise ValueError(
+                f"schema_only_entityset=True requires engine='dfs2sql' (got engine '{self.name}'), "
+                "because this engine computes feature values from the planning EntitySet."
+            )
 
         # Handle empty target dataframe
         if len(target_dataframe) == 0:
@@ -430,14 +441,11 @@ class DFSEngine:
 
         return filtered_features
 
-    def _build_entity_set_from_rdb(
-        self, rdb: RDB, config: Optional[DFSConfig] = None
-    ) -> ft.EntitySet:
+    def _build_entity_set_from_rdb(self, rdb: RDB, config: DFSConfig) -> ft.EntitySet:
         """Build EntitySet from RDB tables only (adapted from existing build_dataframes logic)."""
 
         entity_set = ft.EntitySet(id=rdb.metadata.name)
-        cfg = config if config is not None else self.config
-        schema_only = bool(getattr(cfg, "schema_only_entityset", False))
+        schema_only = config.schema_only_entityset
 
         # Add all RDB tables as entities
         for table_name in rdb.table_names:
