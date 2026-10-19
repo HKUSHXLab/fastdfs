@@ -115,3 +115,24 @@ def test_schema_only_rejected_via_config_overrides(tiny_rdb, target):
             cutoff_time_column="timestamp",
             config_overrides={"schema_only_entityset": True},
         )
+
+
+def test_rdb_tables_not_modified_by_compute(target):
+    users = pd.DataFrame({"user_id": [1, 2], "age": [25, 30]})
+    logs = pd.DataFrame({"kind": ["a", "b"], "value": [1, 2]})  # no primary key
+    rdb = create_rdb(
+        tables={"user": users, "logs": logs},
+        primary_keys={"user": "user_id"},
+        type_hints={"logs": {"kind": "category", "value": "float"}},
+    )
+    before = rdb.get_table("logs").dtypes.copy()
+
+    compute_dfs_features(
+        rdb,
+        target.copy(),
+        key_mappings={"user_id": "user.user_id"},
+        config=_typed_config(schema_only_entityset=True),
+    )
+
+    pd.testing.assert_series_equal(rdb.get_table("logs").dtypes, before)
+    assert "__index__" not in rdb.get_table("logs").columns

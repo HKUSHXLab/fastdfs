@@ -143,7 +143,9 @@ class DFS2SQLEngine(DFSEngine):
     def ingest_rdb_tables(self, builder: DuckDBBuilder, rdb: RDB) -> None:
         """Load all RDB tables into DuckDB (once per warm session)."""
         for table_name in rdb.table_names:
-            df = rdb.get_table(table_name)
+            # Shallow copy: converted columns replace columns in the copy only, so the
+            # caller's RDB DataFrames are never modified (data is not duplicated).
+            df = rdb.get_table(table_name).copy(deep=False)
             table_meta = rdb.get_table_metadata(table_name)
 
             for col_schema in table_meta.columns:
@@ -168,7 +170,6 @@ class DFS2SQLEngine(DFSEngine):
 
             index_col = self._get_table_index(table_meta)
             if index_col == "__index__" and "__index__" not in df.columns:
-                df = df.copy(deep=False)
                 df["__index__"] = range(len(df))
 
             builder.add_dataframe(
