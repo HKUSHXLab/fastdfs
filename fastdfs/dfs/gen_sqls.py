@@ -17,6 +17,8 @@ from sqlglot.expressions import (
     Identifier,
     Cast,
     Literal,
+    Count,
+    Distinct,
 )
 import sqlglot
 from typing import Tuple, Dict, Optional, List
@@ -253,10 +255,11 @@ class FeatureBlock:
             )
 
         def _coalesce(col):
-            # If next aggregation primitive is count, then we need to coalesce the column to 0.
+            # If next aggregation primitive is count or num_unique, coalesce the column to 0:
+            # no child rows means zero (distinct) values, and the column stays int64.
             if (
                 self._descendant_group_by_primitive is None
-                or self._descendant_group_by_primitive.name != "count"
+                or self._descendant_group_by_primitive.name not in ("count", "num_unique")
             ):
                 return col, None
             return Coalesce(this=col, expressions="0"), col.this
@@ -451,6 +454,9 @@ class FeatureBlock:
             # It calculates: -SUM(p * LOG2(p)) where p = count/total
             # Handles NULL values automatically (ignores them)
             return Anonymous(this="entropy", expressions=[source_column])
+        elif self._group_by_primitive.name == "num_unique":
+            # Featuretools name; DuckDB has no num_unique() — use COUNT(DISTINCT …).
+            return Count(this=Distinct(expressions=[source_column]))
         elif self._group_by_primitive.name.startswith("quantile_"):
             # Handle quantile primitives: quantile_25, quantile_75, etc.
             # Extract quantile value from primitive name (e.g., "quantile_25" -> 0.25)

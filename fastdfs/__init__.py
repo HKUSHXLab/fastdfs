@@ -15,7 +15,9 @@ from .api import (
     create_rdb,
     load_rdb,
     compute_dfs_features,
-    DFSPipeline
+    DFSPipeline,
+    DFSSession,
+    DFSSessionError,
 )
 
 # Core components
@@ -36,6 +38,8 @@ __all__ = [
     "load_rdb",
     "compute_dfs_features", 
     "DFSPipeline",
+    "DFSSession",
+    "DFSSessionError",
     
     # Core components
     "DFSConfig",

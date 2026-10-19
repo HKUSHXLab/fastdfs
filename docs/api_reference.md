@@ -123,6 +123,52 @@ key_mappings = {
 
 ---
 
+### `DFSSession`
+
+A warm DFS session bound to one RDB and key/cutoff configuration. Use this when you compute features for **multiple target frames** (train/val/test) against the same prepared RDB.
+
+```python
+class DFSSession:
+    def __init__(
+        self,
+        rdb: RDB,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str] = None,
+        config: Optional[DFSConfig] = None,
+    ): ...
+
+    feature_columns_: Optional[List[str]]
+    n_features_: int
+
+    def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame: ...
+    def close(self) -> None: ...
+```
+
+**Parameters:** same binding fields as `compute_dfs_features` (`rdb`, `key_mappings`, `cutoff_time_column`, `config`).
+
+Call `compute(target_df)` per split; call `close()` (or use the session as a context manager) when finished.
+
+**Notes:**
+- Requires `engine="dfs2sql"` (raises `DFSSessionError` otherwise).
+- The first `compute` freezes the Featuretools feature list, SQL, and DuckDB RDB tables.
+- Later `compute` calls only replace the target/cutoff tables, then re-run SQL + assembly.
+- Feature column order is stable across splits after the first successful compute; later empty splits return those columns with zero rows.
+- The first `compute` needs at least one row to plan features; an empty first split raises `DFSSessionError`.
+
+**Example:**
+```python
+config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
+with fastdfs.DFSSession(
+    rdb, {"user_id": "users.user_id"}, cutoff_time_column="timestamp", config=config
+) as session:
+    train_out = session.compute(train_df)
+    val_out = session.compute(val_df)
+```
+
+Diagnostic counters (useful in tests): `n_plan_calls`, `n_target_ingest_calls`.
+
+---
+
 ### `DFSPipeline`
 
 Pipeline class for combining RDB transforms with DFS feature computation.
@@ -196,6 +242,7 @@ class DFSConfig(pydantic.BaseModel):
 - `max_features` (int): Maximum number of features to generate (-1 for unlimited)
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation
+- `schema_only_entityset` (bool): If `True`, Featuretools planning registers **0-row** RDB frames (schema/dtypes only) instead of full tables. Feature **values** are still computed from full data via DuckDB, so this requires `engine="dfs2sql"` (other engines raise `ValueError`). Default `False`.
 
 **Aggregation primitives:** See **[Aggregation Primitives](aggregation_primitives.md)** for defaults, FastDFS-specific primitives (`quantile_25`, `quantile_75`, `discrete_entropy`), dfs2sql vs featuretools support, SQL mappings, and categorical encoding notes.
 

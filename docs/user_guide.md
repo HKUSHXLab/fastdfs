@@ -338,6 +338,23 @@ new_data = pd.DataFrame({
 new_features = fastdfs.compute_dfs_features(rdb, new_data, key_mappings)
 ```
 
+### Reusing Work Across Splits with `DFSSession`
+
+When several target dataframes share the same RDB, key mappings and cutoff column, a session plans the features and loads the RDB into DuckDB once, then reuses both for every split:
+
+```python
+config = fastdfs.DFSConfig(engine="dfs2sql")
+
+with fastdfs.DFSSession(
+    rdb, key_mappings, cutoff_time_column="timestamp", config=config
+) as session:
+    train_features = session.compute(train_df)  # plans features and loads the RDB
+    val_features = session.compute(val_df)      # reuses both; only the target changes
+    test_features = session.compute(test_df)
+```
+
+`DFSSession` requires `engine="dfs2sql"`. The feature columns are fixed by the first `compute`, so every split gets the same columns in the same order. For a single feature matrix, `compute_dfs_features` is still the simplest option.
+
 ## Transform Pipeline
 
 Transforms preprocess your RDB before feature generation. They're useful for data cleaning, feature engineering, and handling data quality issues.
