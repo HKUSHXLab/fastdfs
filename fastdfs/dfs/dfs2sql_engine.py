@@ -99,6 +99,23 @@ def assemble_dfs2sql_feature_frames(
     return out.sort_values(by=target_index).reset_index(drop=True)
 
 
+def release_duckdb(db: duckdb.DuckDBPyConnection, temp_db_path: Optional[str]) -> None:
+    """Close a dfs2sql DuckDB connection and delete its generated temp DB file, if any.
+
+    ``temp_db_path`` must be set only for a path fastdfs generated itself; a
+    user-supplied ``engine_path`` is never deleted. Errors are logged, not raised.
+    """
+    try:
+        db.close()
+    except Exception as exc:
+        logger.debug(f"Error closing DuckDB: {exc}")
+    if temp_db_path and os.path.exists(temp_db_path):
+        try:
+            os.remove(temp_db_path)
+        except OSError as exc:
+            logger.debug(f"Could not remove temp DuckDB file {temp_db_path}: {exc}")
+
+
 @dfs_engine
 class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
@@ -305,16 +322,8 @@ class DFS2SQLEngine(DFSEngine):
                 cutoff_time_col_name=cutoff_time_col_name,
             )
         finally:
-            try:
-                builder.db.close()
-            except Exception:
-                pass
-            if config.engine_path is None:
-                # open_builder generated a temp path; nobody else knows about it.
-                try:
-                    os.remove(engine_path)
-                except OSError as exc:
-                    logger.debug(f"Could not remove temp DuckDB file {engine_path}: {exc}")
+            # open_builder generated the path only when engine_path is None.
+            release_duckdb(builder.db, engine_path if config.engine_path is None else None)
 
     def _effective_sql_workers(self, config: DFSConfig) -> int:
         return max(1, int(getattr(config, "dfs2sql_sql_workers", 1) or 1))

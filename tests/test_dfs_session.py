@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import gc
 import os
+import tempfile
 
 import pandas as pd
 import pytest
 
 from fastdfs.api import compute_dfs_features
 from fastdfs.dfs import DFSConfig
+from fastdfs.dfs.dfs2sql_engine import DFS2SQLEngine
 from fastdfs.dfs.session import DFSSession, DFSSessionError
 
 
@@ -264,3 +266,39 @@ def test_session_garbage_collection_after_close_keeps_user_engine_path(
     del session
     gc.collect()
     assert db_path.exists()
+
+
+@pytest.mark.parametrize("user_engine_path", [True, False])
+def test_session_retry_after_failed_first_compute(
+    tmp_path, monkeypatch, tiny_rdb, dfs_config, train_target, user_engine_path
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    db_path = tmp_path / "my.db"
+    config = dfs_config.model_copy(
+        update={"engine_path": str(db_path) if user_engine_path else None}
+    )
+    original = DFS2SQLEngine.plan_feature_sqls
+    calls = {"n": 0}
+
+    def fail_once(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient failure")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(DFS2SQLEngine, "plan_feature_sqls", fail_once)
+    with DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    ) as session:
+        with pytest.raises(RuntimeError, match="transient failure"):
+            session.compute(train_target.copy())
+        assert list(tmp_path.glob("fastdfs_*.db*")) == []
+
+        out = session.compute(train_target.copy())
+        assert all(c in out.columns for c in session.feature_columns_)
+
+    assert list(tmp_path.glob("fastdfs_*.db*")) == []
+    assert db_path.exists() == user_engine_path

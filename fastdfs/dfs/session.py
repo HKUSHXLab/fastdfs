@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import weakref
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,7 +15,7 @@ from .base_engine import (
     dfs_feature_renames,
     get_dfs_engine,
 )
-from .dfs2sql_engine import DFS2SQLEngine
+from .dfs2sql_engine import DFS2SQLEngine, release_duckdb
 from .duckdb_database import DuckDBBuilder
 
 __all__ = ["DFSSession", "DFSSessionError"]
@@ -24,22 +23,6 @@ __all__ = ["DFSSession", "DFSSessionError"]
 
 class DFSSessionError(RuntimeError):
     """Raised when a DFSSession is used incorrectly (closed, wrong engine, etc.)."""
-
-
-def _release(db: Any, temp_db_path: Optional[str]) -> None:
-    """Close a session's DuckDB connection and delete its generated temp DB file.
-
-    Module-level (not a method) so the finalizer holds no reference to the session.
-    """
-    try:
-        db.close()
-    except Exception as exc:
-        logger.debug("DFSSession: error closing DuckDB: {}", exc)
-    if temp_db_path and os.path.exists(temp_db_path):
-        try:
-            os.remove(temp_db_path)
-        except OSError as exc:
-            logger.debug("DFSSession: could not remove temp db file {}: {}", temp_db_path, exc)
 
 
 class DFSSession:
@@ -82,7 +65,7 @@ class DFSSession:
         self._builder: Optional[DuckDBBuilder] = None
         # Set only when the session generated the DB path itself; close() deletes it.
         self._temp_db_path: Optional[str] = None
-        # Runs _release on close(), garbage collection or interpreter exit, at most once.
+        # Runs release_duckdb on close(), garbage collection or interpreter exit, at most once.
         self._finalizer: Optional[weakref.finalize] = None
         self._features: Optional[List[Any]] = None
         self._sqls: Optional[List[Any]] = None
@@ -144,7 +127,8 @@ class DFSSession:
             # Match one-shot: no features means the target comes back unchanged.
             return target_df_with_index.drop(columns="__target_index__")
         if not just_planned:
-            self._ingest_target(target_df_for_engine)
+            assert self._builder is not None
+            self._ingest_target(self._builder, target_df_for_engine)
 
         assert self._builder is not None
         assert self._sqls is not None
@@ -215,10 +199,9 @@ class DFSSession:
                     ) from exc
         return out
 
-    def _ingest_target(self, target_df_for_engine: pd.DataFrame) -> None:
-        assert self._builder is not None
+    def _ingest_target(self, builder: DuckDBBuilder, target_df_for_engine: pd.DataFrame) -> None:
         self._engine.ingest_or_replace_target(
-            self._builder,
+            builder,
             target_df_for_engine,
             "__target_index__",
             self._cutoff_time_column,
@@ -251,21 +234,27 @@ class DFSSession:
         self._feature_renames = dfs_feature_renames(features)
 
         builder, engine_path = self._engine.open_builder(self._config)
-        self._builder = builder
-        if self._config.engine_path is None:
-            self._temp_db_path = engine_path
-        self._finalizer = weakref.finalize(self, _release, builder.db, self._temp_db_path)
-        self._engine.ingest_rdb_tables(builder, self._rdb)
-        self._ingest_target(target_df_for_engine)
+        temp_db_path = engine_path if self._config.engine_path is None else None
+        finalizer = weakref.finalize(self, release_duckdb, builder.db, temp_db_path)
+        try:
+            self._engine.ingest_rdb_tables(builder, self._rdb)
+            self._ingest_target(builder, target_df_for_engine)
+            sqls, column_order, cutoff_time_col_name = self._engine.plan_feature_sqls(
+                builder,
+                self._rdb,
+                target_df_for_engine,
+                features,
+                self._cutoff_time_column,
+                self._config,
+            )
+        except BaseException:
+            # Leave the session unprepared with nothing open, so a retry starts clean.
+            finalizer()
+            raise
 
-        sqls, column_order, cutoff_time_col_name = self._engine.plan_feature_sqls(
-            builder,
-            self._rdb,
-            target_df_for_engine,
-            features,
-            self._cutoff_time_column,
-            self._config,
-        )
+        self._builder = builder
+        self._temp_db_path = temp_db_path
+        self._finalizer = finalizer
         self._sqls = sqls
         self._sql_column_order = column_order
         self._cutoff_time_col_name = cutoff_time_col_name
