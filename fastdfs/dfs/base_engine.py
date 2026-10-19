@@ -7,7 +7,6 @@ target dataframes and simplified RDB datasets, removing the dependency on tasks.
 
 import abc
 from typing import Dict, List, Optional, Any, Tuple
-import time
 import pandas as pd
 import featuretools as ft
 import numpy as np
@@ -234,21 +233,7 @@ class DFSEngine:
         target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
 
         # Phase 1: Feature preparation (common logic in base class)
-        t_plan0 = time.perf_counter()
         features = self.prepare_features(rdb, target_df_for_engine, key_mappings, cutoff_time_column, config)
-        plan_s = time.perf_counter() - t_plan0
-        self.last_plan_stats = {
-            "plan_s": plan_s,
-            "n_features": len(features),
-            "schema_only_entityset": bool(getattr(config, "schema_only_entityset", False)),
-            "feature_names": [f.get_name() for f in features],
-        }
-        logger.info(
-            "prepare_features: {:.2f}s n_features={} schema_only_entityset={}",
-            plan_s,
-            len(features),
-            self.last_plan_stats["schema_only_entityset"],
-        )
 
         if len(features) == 0:
             logger.warning("No features generated, check your configuration or data.")
@@ -409,11 +394,7 @@ class DFSEngine:
 
             # Add default index if needed
             if index_col is None:
-                if schema_only:
-                    df = df.copy()
-                    df["__index__"] = pd.Series(dtype="int64")
-                else:
-                    df["__index__"] = np.arange(len(df))
+                df["__index__"] = np.arange(len(df))
                 index_col = "__index__"
 
             entity_set = entity_set.add_dataframe(

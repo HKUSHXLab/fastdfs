@@ -90,8 +90,7 @@ def main():
         train_features = session.compute(train_df)
         val_features = session.compute(val_df)
         print(
-            f"plan={session.n_plan_calls} rdb_ingest={session.n_rdb_ingest_calls} "
-            f"target_ingest={session.n_target_ingest_calls} sql_exec={session.n_sql_exec_calls}"
+            f"plan={session.n_plan_calls} target_ingest={session.n_target_ingest_calls}"
         )
 
     assert list(train_features.columns) == list(val_features.columns)

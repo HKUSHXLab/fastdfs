@@ -169,7 +169,7 @@ class DFSSession:
     def close(self) -> None: ...
 ```
 
-Diagnostic counters (useful in tests): `n_plan_calls`, `n_rdb_ingest_calls`, `n_target_ingest_calls`, `n_sql_exec_calls`.
+Diagnostic counters (useful in tests): `n_plan_calls`, `n_target_ingest_calls`.
 
 ---
 

@@ -28,6 +28,9 @@ class DFSSession:
     First ``compute`` (or ``prepare``) freezes the feature list, SQL, and RDB
     ingest. Later ``compute`` calls only replace ``__target__`` / cutoff tables,
     re-execute SQL, and assemble. Column order is fixed after the first success.
+
+    The RDB is snapshotted into DuckDB on the first ``compute`` (or ``prepare``);
+    later changes to ``rdb`` are not reflected.
     """
 
     def __init__(
@@ -56,7 +59,6 @@ class DFSSession:
         rdb.validate_key_consistency()
 
         self._rdb = rdb
-        self._rdb_id = id(rdb)
         self._key_mappings = dict(key_mappings)
         self._cutoff_time_column = cutoff_time_column
         self._config = effective
@@ -78,9 +80,7 @@ class DFSSession:
 
         # Counters for tests / diagnostics
         self.n_plan_calls = 0
-        self.n_rdb_ingest_calls = 0
         self.n_target_ingest_calls = 0
-        self.n_sql_exec_calls = 0
 
     def __enter__(self) -> "DFSSession":
         return self
@@ -154,13 +154,12 @@ class DFSSession:
         assert self._sqls is not None
         assert self._sql_column_order is not None
 
-        replace_target = self.n_target_ingest_calls > 0
         self._engine.ingest_or_replace_target(
             self._builder,
             target_df_for_engine,
             target_index,
             self._cutoff_time_column,
-            replace=replace_target,
+            replace=True,
         )
         self.n_target_ingest_calls += 1
 
@@ -172,7 +171,6 @@ class DFSSession:
             config=self._config,
             cutoff_time_col_name=self._cutoff_time_col_name,
         )
-        self.n_sql_exec_calls += 1
 
         if self._feature_renames:
             feature_matrix = feature_matrix.rename(columns=self._feature_renames, copy=False)
@@ -184,13 +182,6 @@ class DFSSession:
             ]
             self.n_features_ = len(self.feature_columns_)
         else:
-            missing = [c for c in self.feature_columns_ if c not in feature_matrix.columns]
-            if missing:
-                raise DFSSessionError(
-                    f"Session compute missing expected feature columns: {missing[:5]}…"
-                    if len(missing) > 5
-                    else f"Session compute missing expected feature columns: {missing}"
-                )
             feature_matrix = feature_matrix[[target_index] + self.feature_columns_]
 
         if target_index not in feature_matrix.columns:
@@ -285,9 +276,6 @@ class DFSSession:
         return out
 
     def _plan_and_ingest_rdb(self, target_df_for_engine: pd.DataFrame) -> None:
-        if id(self._rdb) != self._rdb_id:
-            raise DFSSessionError("RDB object identity changed after session creation.")
-
         features = self._engine.prepare_features(
             self._rdb,
             target_df_for_engine,
@@ -317,7 +305,6 @@ class DFSSession:
         self._builder = builder
         self._engine_path = engine_path
         self._engine.ingest_rdb_tables(builder, self._rdb)
-        self.n_rdb_ingest_calls += 1
 
         # features2sql needs cutoff / time-index *names*; table contents are loaded in compute().
         if self._config.use_cutoff_time and self._cutoff_time_column is not None:
