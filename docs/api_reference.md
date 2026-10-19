@@ -123,23 +123,31 @@ key_mappings = {
 
 ---
 
-### `create_dfs_session(...) -> DFSSession`
+### `DFSSession`
 
-Create a warm DFS session bound to one RDB and key/cutoff configuration. Use this when you compute features for **multiple target frames** (train/val/test) against the same prepared RDB.
+A warm DFS session bound to one RDB and key/cutoff configuration. Use this when you compute features for **multiple target frames** (train/val/test) against the same prepared RDB.
 
 ```python
-def create_dfs_session(
-    rdb: RDB,
-    key_mappings: Dict[str, str],
-    cutoff_time_column: Optional[str] = None,
-    config: Optional[DFSConfig] = None,
-    config_overrides: Optional[Dict[str, Any]] = None,
-) -> DFSSession
+class DFSSession:
+    def __init__(
+        self,
+        rdb: RDB,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str] = None,
+        config: Optional[DFSConfig] = None,
+    ): ...
+
+    feature_columns_: Optional[List[str]]
+    n_features_: int
+
+    def prepare(self, target_schema: pd.DataFrame) -> None: ...
+    def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame: ...
+    def close(self) -> None: ...
 ```
 
-**Parameters:** same binding fields as `compute_dfs_features` (`rdb`, `key_mappings`, `cutoff_time_column`, `config`, `config_overrides`).
+**Parameters:** same binding fields as `compute_dfs_features` (`rdb`, `key_mappings`, `cutoff_time_column`, `config`).
 
-**Returns:** `DFSSession` — call `compute(target_df)` per split; call `close()` (or use as a context manager) when finished.
+Call `compute(target_df)` per split; call `close()` (or use the session as a context manager) when finished.
 
 **Notes:**
 - Requires `engine="dfs2sql"` (raises `DFSSessionError` otherwise).
@@ -150,23 +158,11 @@ def create_dfs_session(
 **Example:**
 ```python
 config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
-with fastdfs.create_dfs_session(
+with fastdfs.DFSSession(
     rdb, {"user_id": "users.user_id"}, cutoff_time_column="timestamp", config=config
 ) as session:
     train_out = session.compute(train_df)
     val_out = session.compute(val_df)
-```
-
-### `DFSSession`
-
-```python
-class DFSSession:
-    feature_columns_: Optional[List[str]]
-    n_features_: int
-
-    def prepare(self, target_schema: pd.DataFrame) -> None: ...
-    def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame: ...
-    def close(self) -> None: ...
 ```
 
 Diagnostic counters (useful in tests): `n_plan_calls`, `n_target_ingest_calls`.

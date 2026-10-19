@@ -276,8 +276,9 @@ class DFS2SQLEngine(DFSEngine):
         target_index = "__target_index__"
         builder, _engine_path = self.open_builder(config)
         try:
-            self._build_database_tables(
-                builder, rdb, target_dataframe, target_index, cutoff_time_column
+            self.ingest_rdb_tables(builder, rdb)
+            self.ingest_or_replace_target(
+                builder, target_dataframe, target_index, cutoff_time_column
             )
             sqls, column_order, cutoff_time_col_name = self.plan_feature_sqls(
                 builder, rdb, target_dataframe, features, cutoff_time_column, config
@@ -361,20 +362,6 @@ class DFS2SQLEngine(DFSEngine):
                 slots[idx] = frame
 
         return [frame for frame in slots if frame is not None]
-
-    def _build_database_tables(
-        self,
-        builder: DuckDBBuilder,
-        rdb: RDB,
-        target_dataframe: pd.DataFrame,
-        target_index: str,
-        cutoff_time_column: Optional[str]
-    ):
-        """Build database tables for SQL execution (adapted from existing build_dataframes logic)."""
-        self.ingest_rdb_tables(builder, rdb)
-        self.ingest_or_replace_target(
-            builder, target_dataframe, target_index, cutoff_time_column, replace=False
-        )
 
     def _get_table_index(self, table_meta) -> str:
         """Get the primary key column for a table."""

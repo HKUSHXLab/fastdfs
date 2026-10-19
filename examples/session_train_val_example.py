@@ -81,7 +81,7 @@ def main():
         schema_only_entityset=True,
     )
 
-    with fastdfs.create_dfs_session(
+    with fastdfs.DFSSession(
         transformed_rdb,
         key_mappings,
         cutoff_time_column="timestamp",

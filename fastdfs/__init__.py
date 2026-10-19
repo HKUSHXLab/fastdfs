@@ -18,7 +18,6 @@ from .api import (
     DFSPipeline,
     DFSSession,
     DFSSessionError,
-    create_dfs_session,
 )
 
 # Core components
@@ -41,7 +40,6 @@ __all__ = [
     "DFSPipeline",
     "DFSSession",
     "DFSSessionError",
-    "create_dfs_session",
     
     # Core components
     "DFSConfig",

@@ -345,7 +345,7 @@ When several target dataframes share the same RDB, key mappings and cutoff colum
 ```python
 config = fastdfs.DFSConfig(engine="dfs2sql")
 
-with fastdfs.create_dfs_session(
+with fastdfs.DFSSession(
     rdb, key_mappings, cutoff_time_column="timestamp", config=config
 ) as session:
     train_features = session.compute(train_df)  # plans features and loads the RDB

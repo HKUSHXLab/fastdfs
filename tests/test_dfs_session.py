@@ -5,30 +5,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from fastdfs.api import compute_dfs_features, create_dfs_session, create_rdb
+from fastdfs.api import compute_dfs_features
 from fastdfs.dfs import DFSConfig
-from fastdfs.dfs.session import DFSSessionError
-
-
-@pytest.fixture
-def tiny_rdb():
-    users = pd.DataFrame({"user_id": [1, 2, 3], "age": [25.0, 30.0, 35.0]})
-    events = pd.DataFrame(
-        {
-            "event_id": [10, 11, 12, 13],
-            "user_id": [1, 1, 2, 3],
-            "amount": [5.0, 7.0, 9.0, 11.0],
-            "timestamp": pd.to_datetime(
-                ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"]
-            ),
-        }
-    )
-    return create_rdb(
-        tables={"user": users, "event": events},
-        primary_keys={"user": "user_id", "event": "event_id"},
-        foreign_keys=[("event", "user_id", "user", "user_id")],
-        time_columns={"event": "timestamp"},
-    )
+from fastdfs.dfs.session import DFSSession, DFSSessionError
 
 
 @pytest.fixture
@@ -71,7 +50,7 @@ def test_session_parity_with_oneshot(tiny_rdb, dfs_config, train_target):
         cutoff_time_column="timestamp",
         config=dfs_config,
     )
-    with create_dfs_session(
+    with DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",
@@ -90,7 +69,7 @@ def test_session_parity_with_oneshot(tiny_rdb, dfs_config, train_target):
 def test_session_reuses_plan_and_rdb_ingest(
     tiny_rdb, dfs_config, train_target, val_target
 ):
-    with create_dfs_session(
+    with DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",
@@ -107,7 +86,7 @@ def test_session_reuses_plan_and_rdb_ingest(
 
 
 def test_session_close_blocks_compute(tiny_rdb, dfs_config, train_target):
-    session = create_dfs_session(
+    session = DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",
@@ -121,7 +100,7 @@ def test_session_close_blocks_compute(tiny_rdb, dfs_config, train_target):
 
 def test_session_rejects_non_dfs2sql(tiny_rdb, train_target):
     with pytest.raises(DFSSessionError, match="dfs2sql"):
-        create_dfs_session(
+        DFSSession(
             tiny_rdb,
             {"user_id": "user.user_id"},
             cutoff_time_column="timestamp",
@@ -132,7 +111,7 @@ def test_session_rejects_non_dfs2sql(tiny_rdb, train_target):
 def test_session_prepare_then_compute(
     tiny_rdb, dfs_config, train_target, val_target
 ):
-    with create_dfs_session(
+    with DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",
@@ -159,7 +138,7 @@ def test_session_val_matches_oneshot_val(
         cutoff_time_column="timestamp",
         config=dfs_config,
     )
-    with create_dfs_session(
+    with DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",
@@ -189,7 +168,7 @@ def test_reserved_target_index_column_raises(tiny_rdb, dfs_config, train_target)
             cutoff_time_column="timestamp",
             config=dfs_config,
         )
-    with create_dfs_session(
+    with DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",
@@ -210,7 +189,7 @@ def test_session_zero_features_matches_oneshot(
         cutoff_time_column="timestamp",
         config=config,
     )
-    with create_dfs_session(
+    with DFSSession(
         tiny_rdb,
         {"user_id": "user.user_id"},
         cutoff_time_column="timestamp",

@@ -105,7 +105,7 @@ def main():
             print(f"  - {col}")
 
     # 6. For train/val/test on the same RDB, prefer DFSSession (see session_train_val_example.py)
-    print("\nTip: use fastdfs.create_dfs_session(...) when computing multiple splits.")
+    print("\nTip: use fastdfs.DFSSession(...) when computing multiple splits.")
     
     print("\n=== Example completed successfully! ===")
 

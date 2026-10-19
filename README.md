@@ -70,11 +70,11 @@ Full tables and setup notes: [dfs2sql parallel SQL benchmarks](docs/dfs2sql_para
 
 ## Multi-split sessions (train / val / test)
 
-When the RDB is fixed and only the target rows change, reuse planning and DuckDB ingest with `create_dfs_session` (`engine="dfs2sql"`):
+When the RDB is fixed and only the target rows change, reuse planning and DuckDB ingest with `DFSSession` (`engine="dfs2sql"`):
 
 ```python
 config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
-with fastdfs.create_dfs_session(
+with fastdfs.DFSSession(
     rdb,
     key_mappings={"user_id": "user.user_id", "item_id": "item.item_id"},
     cutoff_time_column="interaction_time",

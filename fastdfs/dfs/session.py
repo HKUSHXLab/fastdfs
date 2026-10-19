@@ -18,7 +18,7 @@ from .base_engine import (
 from .dfs2sql_engine import DFS2SQLEngine
 from .duckdb_database import DuckDBBuilder
 
-__all__ = ["DFSSession", "DFSSessionError", "create_dfs_session"]
+__all__ = ["DFSSession", "DFSSessionError"]
 
 
 class DFSSessionError(RuntimeError):
@@ -42,15 +42,10 @@ class DFSSession:
         key_mappings: Dict[str, str],
         cutoff_time_column: Optional[str] = None,
         config: Optional[DFSConfig] = None,
-        config_overrides: Optional[Dict[str, Any]] = None,
     ):
         if config is None:
             config = DFSConfig()
         effective = config.copy(deep=True)
-        if config_overrides:
-            for key, value in config_overrides.items():
-                if hasattr(effective, key):
-                    setattr(effective, key, value)
 
         if effective.engine != "dfs2sql":
             raise DFSSessionError(
@@ -263,20 +258,3 @@ class DFSSession:
         self._sql_column_order = column_order
         self._cutoff_time_col_name = cutoff_time_col_name
         self._prepared = True
-
-
-def create_dfs_session(
-    rdb: RDB,
-    key_mappings: Dict[str, str],
-    cutoff_time_column: Optional[str] = None,
-    config: Optional[DFSConfig] = None,
-    config_overrides: Optional[Dict[str, Any]] = None,
-) -> DFSSession:
-    """Create a warm DFS session bound to one RDB and key/cutoff config."""
-    return DFSSession(
-        rdb=rdb,
-        key_mappings=key_mappings,
-        cutoff_time_column=cutoff_time_column,
-        config=config,
-        config_overrides=config_overrides,
-    )
