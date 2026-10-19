@@ -317,3 +317,20 @@ def test_session_compute_does_not_modify_target(tiny_rdb, dfs_config, train_targ
 
     assert out["user_id"].dtype == object  # keys were coerced in the output...
     pd.testing.assert_frame_equal(target, snapshot)  # ...but not in the caller's frame
+
+
+def test_session_empty_first_split_raises(tiny_rdb, dfs_config, train_target):
+    with DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=dfs_config,
+    ) as session:
+        with pytest.raises(DFSSessionError, match="needs at least one row"):
+            session.compute(train_target.iloc[:0])
+        assert session.feature_columns_ is None
+
+        # The session is still usable: plan on a non-empty split, then empty is fine.
+        train_out = session.compute(train_target.copy())
+        empty_out = session.compute(train_target.iloc[:0])
+        assert list(empty_out.columns) == list(train_out.columns)

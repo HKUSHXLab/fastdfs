@@ -110,11 +110,17 @@ class DFSSession:
 
         After the first compute, an empty target still returns the frozen
         feature columns (with zero rows), so every split has the same columns.
+        The first compute must have at least one row, because it plans the
+        features; an empty first target raises ``DFSSessionError``.
         """
         self._ensure_open()
-        # Planning needs rows; before the first plan, match one-shot and return as-is.
+        # Planning needs rows. Returning the frame unchanged here would silently give
+        # this split fewer columns than every later one, so fail loudly instead.
         if len(target_dataframe) == 0 and not self._prepared:
-            return target_dataframe
+            raise DFSSessionError(
+                "The first DFSSession.compute() needs at least one row to plan features; "
+                "compute a non-empty split (e.g. train) first. Later empty splits are fine."
+            )
 
         target_df_with_index, target_df_for_engine = self._prepare_target_frame(
             target_dataframe

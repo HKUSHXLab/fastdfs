@@ -152,7 +152,8 @@ Call `compute(target_df)` per split; call `close()` (or use the session as a con
 - Requires `engine="dfs2sql"` (raises `DFSSessionError` otherwise).
 - The first `compute` freezes the Featuretools feature list, SQL, and DuckDB RDB tables.
 - Later `compute` calls only replace the target/cutoff tables, then re-run SQL + assembly.
-- Feature column order is stable across splits after the first successful compute.
+- Feature column order is stable across splits after the first successful compute; later empty splits return those columns with zero rows.
+- The first `compute` needs at least one row to plan features; an empty first split raises `DFSSessionError`.
 
 **Example:**
 ```python
