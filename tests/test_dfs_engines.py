@@ -8,6 +8,8 @@ for external target dataframes using the simplified RDB dataset interface.
 from loguru import logger
 logger.enable("fastdfs")
 
+import tempfile
+
 import pytest
 import pandas as pd
 import numpy as np
@@ -495,6 +497,23 @@ class TestDFS2SQLEngine:
 
         expected = events.groupby("user_id")["kind"].nunique()
         assert result_df["d2__user.NUM_UNIQUE(event.kind)"].tolist() == expected.loc[[1, 2, 3]].tolist()
+
+    def test_temp_db_file_removed_after_compute(self, tmp_path, monkeypatch):
+        """Without engine_path, the generated temp DuckDB file is deleted after one-shot compute."""
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+        users = pd.DataFrame({"user_id": [1, 2], "age": [25.0, 30.0]})
+        rdb = create_rdb(tables={"user": users}, primary_keys={"user": "user_id"})
+        config = DFSConfig(engine="dfs2sql", max_depth=1)
+        assert config.engine_path is None
+
+        compute_dfs_features(
+            rdb,
+            pd.DataFrame({"user_id": [1, 2]}),
+            key_mappings={"user_id": "user.user_id"},
+            config=config,
+        )
+
+        assert list(tmp_path.glob("fastdfs_*.db*")) == []
 
 
 class TestEngineComparison:

@@ -2,6 +2,7 @@
 SQL-based DFS engine implementation for the new interface.
 """
 
+import os
 import tempfile
 import time
 import uuid
@@ -274,7 +275,7 @@ class DFS2SQLEngine(DFSEngine):
     ) -> pd.DataFrame:
         """Compute feature values using SQL generation (one-shot; opens a fresh DuckDB)."""
         target_index = "__target_index__"
-        builder, _engine_path = self.open_builder(config)
+        builder, engine_path = self.open_builder(config)
         try:
             self.ingest_rdb_tables(builder, rdb)
             self.ingest_or_replace_target(
@@ -296,6 +297,12 @@ class DFS2SQLEngine(DFSEngine):
                 builder.db.close()
             except Exception:
                 pass
+            if config.engine_path is None:
+                # open_builder generated a temp path; nobody else knows about it.
+                try:
+                    os.remove(engine_path)
+                except OSError as exc:
+                    logger.debug(f"Could not remove temp DuckDB file {engine_path}: {exc}")
 
     def _effective_sql_workers(self, config: DFSConfig) -> int:
         return max(1, int(getattr(config, "dfs2sql_sql_workers", 1) or 1))
