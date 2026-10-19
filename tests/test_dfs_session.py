@@ -177,3 +177,49 @@ def test_session_val_matches_oneshot_val(
         oneshot_val[shared].reset_index(drop=True),
         check_dtype=False,
     )
+
+
+def test_reserved_target_index_column_raises(tiny_rdb, dfs_config, train_target):
+    target = train_target.assign(__target_index__=[5, 6])
+    with pytest.raises(ValueError, match="reserved column name"):
+        compute_dfs_features(
+            tiny_rdb,
+            target.copy(),
+            key_mappings={"user_id": "user.user_id"},
+            cutoff_time_column="timestamp",
+            config=dfs_config,
+        )
+    with create_dfs_session(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=dfs_config,
+    ) as session:
+        with pytest.raises(ValueError, match="reserved column name"):
+            session.compute(target.copy())
+
+
+def test_session_zero_features_matches_oneshot(
+    tiny_rdb, dfs_config, train_target, val_target
+):
+    config = dfs_config.model_copy(update={"max_depth": 0})
+    oneshot_val = compute_dfs_features(
+        tiny_rdb,
+        val_target.copy(),
+        key_mappings={"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    )
+    with create_dfs_session(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    ) as session:
+        train_out = session.compute(train_target.copy())
+        val_out = session.compute(val_target.copy())
+        assert session.feature_columns_ == []
+        assert session.n_target_ingest_calls == 0
+
+    assert list(train_out.columns) == list(train_target.columns)
+    pd.testing.assert_frame_equal(val_out, oneshot_val)

@@ -44,6 +44,63 @@ def dfs_feature_column_name(feature: ft.FeatureBase) -> str:
     return f"d{int(feature.get_depth())}__{feature.get_name()}"
 
 
+def dfs_feature_renames(features: List[ft.FeatureBase]) -> Dict[str, str]:
+    """Map Featuretools feature names to ``dfs_feature_column_name`` where they differ."""
+    renames = {}
+    for f in features:
+        old = f.get_name()
+        new = dfs_feature_column_name(f)
+        if old != new:
+            renames[old] = new
+    return renames
+
+
+def coerce_target_key_types(
+    rdb: RDB, target_dataframe: pd.DataFrame, key_mappings: Dict[str, str]
+) -> None:
+    """Validate key mappings and convert target key columns to string, in place."""
+    for target_col, rdb_key in key_mappings.items():
+        if target_col not in target_dataframe.columns:
+            raise ValueError(f"Key column '{target_col}' not found in target dataframe.")
+
+        table_name, col_name = rdb_key.split('.')
+        try:
+            table_meta = rdb.get_table_metadata(table_name)
+        except ValueError:
+            raise ValueError(f"Table '{table_name}' not found in RDB.")
+
+        if col_name not in table_meta.column_dict:
+            raise ValueError(f"Column '{col_name}' not found in table '{table_name}'.")
+
+        col_meta = table_meta.column_dict[col_name]
+
+        if col_meta.dtype != RDBColumnDType.primary_key:
+            raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
+
+        if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
+            # Convert target column to string to match RDB key columns (which should always be string)
+            target_col_dtype = target_dataframe[target_col].dtype
+
+            # Convert to string if not already string (categorical is converted for consistency)
+            if not pd.api.types.is_string_dtype(target_col_dtype):
+                try:
+                    target_dataframe[target_col] = target_dataframe[target_col].astype(str)
+
+                    # Log the conversion for transparency
+                    logger.debug(
+                        f"Converted target column '{target_col}' from {target_col_dtype} to string "
+                        f"to match RDB key '{rdb_key}'"
+                    )
+                except (ValueError, TypeError) as e:
+                    # If conversion fails, raise a helpful error
+                    raise TypeError(
+                        f"Failed to convert column '{target_col}' from {target_col_dtype} to string "
+                        f"to match RDB key '{rdb_key}'. Original error: {e}. "
+                        f"Please ensure the values are compatible or manually convert: "
+                        f"target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
+                    )
+
+
 # Custom quantile aggregation primitives
 class Quantile25(ft.primitives.AggregationPrimitive):
     """Calculates the 25th percentile (Q1) of a numeric column."""
@@ -212,25 +269,9 @@ class DFSEngine:
         if len(target_dataframe) == 0:
             return target_dataframe
 
-        original_index = target_dataframe.index
-
-        target_index = "__target_index__"
-        if target_index in target_dataframe.columns:
-            logger.error(f"Target dataframe cannot contain reserved column name '{target_index}'.")
-        # Assign creates a new dataframe but reuses underlying blocks where possible.
-        target_df_with_index = target_dataframe.assign(
-            **{target_index: np.arange(len(target_dataframe))}
+        target_df_with_index, target_df_for_engine = self._prepare_target_for_engine(
+            target_dataframe, key_mappings, cutoff_time_column
         )
-
-        # Optimization: Filter target dataframe to only include necessary columns
-        # This defines the contract for the engines: they only see keys, time, and index.
-        columns_to_keep = {target_index}
-        columns_to_keep.update(key_mappings.keys())
-        if cutoff_time_column:
-            columns_to_keep.add(cutoff_time_column)
-            
-        # Work on a defensive copy that engines are free to mutate.
-        target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
 
         # Phase 1: Feature preparation (common logic in base class)
         features = self.prepare_features(rdb, target_df_for_engine, key_mappings, cutoff_time_column, config)
@@ -244,27 +285,58 @@ class DFSEngine:
             rdb, target_df_for_engine, key_mappings, cutoff_time_column, features, config
         )
 
-        renames = {}
-        for f in features:
-            old = f.get_name()
-            new = dfs_feature_column_name(f)
-            if old != new and old in feature_matrix.columns:
-                renames[old] = new
+        renames = dfs_feature_renames(features)
         if renames:
             feature_matrix = feature_matrix.rename(columns=renames, copy=False)
 
-        if target_index not in feature_matrix.columns:
-            logger.error("Feature matrix is missing the target index column '__target_index__'.")
+        return self._join_features_to_target(
+            target_df_with_index, feature_matrix, target_dataframe.index
+        )
 
-        # Align features with original target rows using the target index
+    def _prepare_target_for_engine(
+        self,
+        target_dataframe: pd.DataFrame,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str],
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Add ``__target_index__`` and keep only the columns engines may see.
+
+        Returns ``(target_df_with_index, target_df_for_engine)``: the full target
+        with the index column, and a defensive copy holding only the index, key
+        and cutoff columns, which engines are free to mutate.
+        """
+        target_index = "__target_index__"
+        if target_index in target_dataframe.columns:
+            raise ValueError(f"Target dataframe cannot contain reserved column name '{target_index}'.")
+        # Assign creates a new dataframe but reuses underlying blocks where possible.
+        target_df_with_index = target_dataframe.assign(
+            **{target_index: np.arange(len(target_dataframe))}
+        )
+
+        # This defines the contract for the engines: they only see keys, time, and index.
+        columns_to_keep = {target_index}
+        columns_to_keep.update(key_mappings.keys())
+        if cutoff_time_column:
+            columns_to_keep.add(cutoff_time_column)
+
+        target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
+        return target_df_with_index, target_df_for_engine
+
+    def _join_features_to_target(
+        self,
+        target_df_with_index: pd.DataFrame,
+        feature_matrix: pd.DataFrame,
+        original_index: pd.Index,
+    ) -> pd.DataFrame:
+        """Join features onto the target rows by ``__target_index__`` and restore the original index."""
+        target_index = "__target_index__"
+        if target_index not in feature_matrix.columns:
+            raise ValueError(f"Feature matrix is missing the target index column '{target_index}'.")
+
         target_with_idx = target_df_with_index.set_index(target_index)
         features_with_idx = feature_matrix.set_index(target_index)
-
         merged = target_with_idx.join(features_with_idx, how="left")
-
-        # Restore the original index ordering
         merged.index = original_index
-
         return merged
 
     def prepare_features(

@@ -11,6 +11,7 @@ from pathlib import Path
 from loguru import logger
 
 from .dfs import DFSConfig, get_dfs_engine
+from .dfs.base_engine import coerce_target_key_types
 from .dfs.session import DFSSession, DFSSessionError, create_dfs_session
 from .dataset.rdb import RDB
 from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat, RDBColumnDType
@@ -141,47 +142,9 @@ def compute_dfs_features(
     if config is None:
         config = DFSConfig()
     
-    # Validate key types
-    for target_col, rdb_key in key_mappings.items():
-        if target_col not in target_dataframe.columns:
-            raise ValueError(f"Key column '{target_col}' not found in target dataframe.")
-            
-        table_name, col_name = rdb_key.split('.')
-        try:
-            table_meta = rdb.get_table_metadata(table_name)
-        except ValueError:
-            raise ValueError(f"Table '{table_name}' not found in RDB.")
-            
-        if col_name not in table_meta.column_dict:
-            raise ValueError(f"Column '{col_name}' not found in table '{table_name}'.")
-            
-        col_meta = table_meta.column_dict[col_name]
+    # Validate key mappings and convert target key columns to string
+    coerce_target_key_types(rdb, target_dataframe, key_mappings)
 
-        if col_meta.dtype != RDBColumnDType.primary_key:
-            raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
-
-        if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
-            # Convert target column to string to match RDB key columns (which should always be string)
-            target_col_dtype = target_dataframe[target_col].dtype
-            
-            # Convert to string if not already string (categorical is converted for consistency)
-            if not pd.api.types.is_string_dtype(target_col_dtype):
-                try:
-                    target_dataframe[target_col] = target_dataframe[target_col].astype(str)
-                    
-                    # Log the conversion for transparency
-                    logger.debug(
-                        f"Converted target column '{target_col}' from {target_col_dtype} to string "
-                        f"to match RDB key '{rdb_key}'"
-                    )
-                except (ValueError, TypeError) as e:
-                    # If conversion fails, raise a helpful error
-                    raise TypeError(
-                        f"Failed to convert column '{target_col}' from {target_col_dtype} to string "
-                        f"to match RDB key '{rdb_key}'. Original error: {e}. "
-                        f"Please ensure the values are compatible or manually convert: "
-                        f"target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
-                    )
     # Canonicalize key types in RDB to ensure consistency (e.g., all keys as strings)
     rdb=rdb.canonicalize_key_types()
     # Validate key consistency across all tables in the RDB

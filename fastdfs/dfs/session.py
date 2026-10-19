@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 from loguru import logger
 
-from ..dataset.meta import RDBColumnDType
 from ..dataset.rdb import RDB
-from .base_engine import DFSConfig, dfs_feature_column_name, get_dfs_engine
+from .base_engine import (
+    DFSConfig,
+    coerce_target_key_types,
+    dfs_feature_renames,
+    get_dfs_engine,
+)
 from .dfs2sql_engine import DFS2SQLEngine
 from .duckdb_database import DuckDBBuilder
 
@@ -116,8 +119,8 @@ class DFSSession:
         self._ensure_open()
         if self._prepared:
             return
-        prepared_target = self._prepare_target_frame(target_schema, pin_dtypes=True)
-        self._plan_and_ingest_rdb(prepared_target)
+        _, target_df_for_engine = self._prepare_target_frame(target_schema)
+        self._plan_and_ingest_rdb(target_df_for_engine)
 
     def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame:
         """Compute DFS features for one target frame, reusing warm state when available."""
@@ -125,34 +128,20 @@ class DFSSession:
         if len(target_dataframe) == 0:
             return target_dataframe
 
-        original_index = target_dataframe.index
-        # Defensive copy so key coercion does not mutate caller unexpectedly across splits.
-        target_dataframe = target_dataframe.copy()
-        self._coerce_key_columns(target_dataframe)
-
-        target_index = "__target_index__"
-        if target_index in target_dataframe.columns:
-            raise DFSSessionError(
-                f"Target dataframe cannot contain reserved column name '{target_index}'."
-            )
-
-        target_df_with_index = target_dataframe.assign(
-            **{target_index: np.arange(len(target_dataframe))}
+        target_df_with_index, target_df_for_engine = self._prepare_target_frame(
+            target_dataframe
         )
-        columns_to_keep = {target_index}
-        columns_to_keep.update(self._key_mappings.keys())
-        if self._cutoff_time_column:
-            columns_to_keep.add(self._cutoff_time_column)
-        target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
-        target_df_for_engine = self._apply_pinned_dtypes(target_df_for_engine)
 
-        if not self._prepared:
+        just_planned = not self._prepared
+        if just_planned:
             self._plan_and_ingest_rdb(target_df_for_engine)
-        else:
+        if not self._features:
+            # Match one-shot: no features means the target comes back unchanged.
+            return target_df_with_index.drop(columns="__target_index__")
+        if not just_planned:
             self._ingest_target(target_df_for_engine)
 
         assert self._builder is not None
-        assert self._features is not None
         assert self._sqls is not None
         assert self._sql_column_order is not None
 
@@ -171,20 +160,15 @@ class DFSSession:
         if self.feature_columns_ is None:
             # Stable output feature column order (after renames), excluding target index.
             self.feature_columns_ = [
-                c for c in feature_matrix.columns if c != target_index
+                c for c in feature_matrix.columns if c != "__target_index__"
             ]
             self.n_features_ = len(self.feature_columns_)
         else:
-            feature_matrix = feature_matrix[[target_index] + self.feature_columns_]
+            feature_matrix = feature_matrix[["__target_index__"] + self.feature_columns_]
 
-        if target_index not in feature_matrix.columns:
-            raise DFSSessionError("Feature matrix is missing '__target_index__'.")
-
-        target_with_idx = target_df_with_index.set_index(target_index)
-        features_with_idx = feature_matrix.set_index(target_index)
-        merged = target_with_idx.join(features_with_idx, how="left")
-        merged.index = original_index
-        return merged
+        return self._engine._join_features_to_target(
+            target_df_with_index, feature_matrix, target_dataframe.index
+        )
 
     # ------------------------------------------------------------------ internals
 
@@ -192,58 +176,16 @@ class DFSSession:
         if self._closed:
             raise DFSSessionError("DFSSession is closed.")
 
-    def _coerce_key_columns(self, target_dataframe: pd.DataFrame) -> None:
-        for target_col, rdb_key in self._key_mappings.items():
-            if target_col not in target_dataframe.columns:
-                raise ValueError(f"Key column '{target_col}' not found in target dataframe.")
-            table_name, col_name = rdb_key.split(".")
-            try:
-                table_meta = self._rdb.get_table_metadata(table_name)
-            except ValueError as exc:
-                raise ValueError(f"Table '{table_name}' not found in RDB.") from exc
-            if col_name not in table_meta.column_dict:
-                raise ValueError(f"Column '{col_name}' not found in table '{table_name}'.")
-            col_meta = table_meta.column_dict[col_name]
-            if col_meta.dtype != RDBColumnDType.primary_key:
-                raise ValueError(
-                    f"RDB column '{rdb_key}' is not a primary key. "
-                    "Key mappings must point to primary keys."
-                )
-            if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
-                target_col_dtype = target_dataframe[target_col].dtype
-                if not pd.api.types.is_string_dtype(target_col_dtype):
-                    target_dataframe[target_col] = target_dataframe[target_col].astype(str)
-
     def _prepare_target_frame(
-        self, target_dataframe: pd.DataFrame, *, pin_dtypes: bool
-    ) -> pd.DataFrame:
-        if len(target_dataframe) == 0 and "__target_index__" not in target_dataframe.columns:
-            # Allow empty schema frames for prepare(): still need columns present.
-            frame = target_dataframe.copy()
-            self._coerce_key_columns(frame)
-            frame = frame.assign(**{"__target_index__": pd.Series(dtype=np.int64)})
-            columns_to_keep = {"__target_index__"}
-            columns_to_keep.update(self._key_mappings.keys())
-            if self._cutoff_time_column:
-                columns_to_keep.add(self._cutoff_time_column)
-            frame = frame[list(columns_to_keep)]
-            if pin_dtypes:
-                self._pin_dtypes_from(frame)
-            return self._apply_pinned_dtypes(frame)
-
-        # Non-empty: mirror compute() prep without full matrix path.
+        self, target_dataframe: pd.DataFrame
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        # Copy so key coercion does not mutate the caller's frame across splits.
         frame = target_dataframe.copy()
-        self._coerce_key_columns(frame)
-        target_index = "__target_index__"
-        frame = frame.assign(**{target_index: np.arange(len(frame))})
-        columns_to_keep = {target_index}
-        columns_to_keep.update(self._key_mappings.keys())
-        if self._cutoff_time_column:
-            columns_to_keep.add(self._cutoff_time_column)
-        frame = frame[list(columns_to_keep)].copy()
-        if pin_dtypes:
-            self._pin_dtypes_from(frame)
-        return self._apply_pinned_dtypes(frame)
+        coerce_target_key_types(self._rdb, frame, self._key_mappings)
+        target_df_with_index, target_df_for_engine = self._engine._prepare_target_for_engine(
+            frame, self._key_mappings, self._cutoff_time_column
+        )
+        return target_df_with_index, self._apply_pinned_dtypes(target_df_for_engine)
 
     def _pin_dtypes_from(self, target_df: pd.DataFrame) -> None:
         cols = list(self._key_mappings.keys())
@@ -295,15 +237,13 @@ class DFSSession:
             self.n_plan_calls,
         )
         if not features:
-            raise DFSSessionError("No features generated; check configuration or data.")
+            logger.warning("No features generated, check your configuration or data.")
+            self.feature_columns_ = []
+            self.n_features_ = 0
+            self._prepared = True
+            return
 
-        renames: Dict[str, str] = {}
-        for f in features:
-            old = f.get_name()
-            new = dfs_feature_column_name(f)
-            if old != new:
-                renames[old] = new
-        self._feature_renames = renames
+        self._feature_renames = dfs_feature_renames(features)
 
         builder, engine_path = self._engine.open_builder(self._config)
         self._builder = builder
