@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 
 import pandas as pd
@@ -226,3 +227,40 @@ def test_session_empty_split_keeps_feature_columns(tiny_rdb, dfs_config, train_t
     assert len(empty_out) == 0
     assert all(c in empty_out.columns for c in session.feature_columns_)
     pd.testing.assert_series_equal(empty_out.dtypes, train_out.dtypes)
+
+
+def test_session_without_close_removes_temp_engine_path(tiny_rdb, dfs_config, train_target):
+    config = dfs_config.model_copy(update={"engine_path": None})
+    session = DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    )
+    session.compute(train_target.copy())
+    temp_path = session._temp_db_path
+    assert temp_path is not None and os.path.exists(temp_path)
+
+    del session
+    gc.collect()
+    assert not os.path.exists(temp_path)
+
+
+def test_session_garbage_collection_after_close_keeps_user_engine_path(
+    tmp_path, tiny_rdb, dfs_config, train_target
+):
+    db_path = tmp_path / "my.db"
+    config = dfs_config.model_copy(update={"engine_path": str(db_path)})
+    session = DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=config,
+    )
+    session.compute(train_target.copy())
+    session.close()
+    session.close()
+
+    del session
+    gc.collect()
+    assert db_path.exists()

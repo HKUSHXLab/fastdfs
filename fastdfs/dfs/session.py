@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import weakref
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -23,6 +24,22 @@ __all__ = ["DFSSession", "DFSSessionError"]
 
 class DFSSessionError(RuntimeError):
     """Raised when a DFSSession is used incorrectly (closed, wrong engine, etc.)."""
+
+
+def _release(db: Any, temp_db_path: Optional[str]) -> None:
+    """Close a session's DuckDB connection and delete its generated temp DB file.
+
+    Module-level (not a method) so the finalizer holds no reference to the session.
+    """
+    try:
+        db.close()
+    except Exception as exc:
+        logger.debug("DFSSession: error closing DuckDB: {}", exc)
+    if temp_db_path and os.path.exists(temp_db_path):
+        try:
+            os.remove(temp_db_path)
+        except OSError as exc:
+            logger.debug("DFSSession: could not remove temp db file {}: {}", temp_db_path, exc)
 
 
 class DFSSession:
@@ -65,6 +82,8 @@ class DFSSession:
         self._builder: Optional[DuckDBBuilder] = None
         # Set only when the session generated the DB path itself; close() deletes it.
         self._temp_db_path: Optional[str] = None
+        # Runs _release on close(), garbage collection or interpreter exit, at most once.
+        self._finalizer: Optional[weakref.finalize] = None
         self._features: Optional[List[Any]] = None
         self._sqls: Optional[List[Any]] = None
         self._sql_column_order: Optional[List[str]] = None
@@ -92,22 +111,15 @@ class DFSSession:
 
         Deletes the DB file only if the session generated a temporary path
         (``config.engine_path`` is ``None``); a user-supplied path is kept.
+        The same cleanup also runs if the session is garbage-collected or the
+        interpreter exits without ``close()``.
         """
         if self._closed:
             return
         self._closed = True
-        if self._builder is not None:
-            try:
-                self._builder.db.close()
-            except Exception as exc:
-                logger.debug("DFSSession: error closing DuckDB: {}", exc)
-            self._builder = None
-        path = self._temp_db_path
-        if path and os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError as exc:
-                logger.debug("DFSSession: could not remove temp db file {}: {}", path, exc)
+        if self._finalizer is not None:
+            self._finalizer()
+        self._builder = None
         self._temp_db_path = None
 
     def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -242,6 +254,7 @@ class DFSSession:
         self._builder = builder
         if self._config.engine_path is None:
             self._temp_db_path = engine_path
+        self._finalizer = weakref.finalize(self, _release, builder.db, self._temp_db_path)
         self._engine.ingest_rdb_tables(builder, self._rdb)
         self._ingest_target(target_df_for_engine)
 
