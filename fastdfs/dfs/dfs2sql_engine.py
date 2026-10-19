@@ -132,11 +132,22 @@ class DFS2SQLEngine(DFSEngine):
             for col_schema in table_meta.columns:
                 if col_schema.name in df.columns:
                     if col_schema.dtype == RDBColumnDType.float_t:
-                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
+                        # float64 like woodwork's Double, also for float32/int columns.
+                        df[col_schema.name] = pd.to_numeric(
+                            df[col_schema.name], errors='coerce'
+                        ).astype("float64")
                     elif col_schema.dtype == RDBColumnDType.datetime_t:
                         df[col_schema.name] = pd.to_datetime(df[col_schema.name], errors='coerce')
                     elif col_schema.dtype == RDBColumnDType.timestamp_t:
                         df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
+                    elif col_schema.dtype == RDBColumnDType.category_t:
+                        # Same conversion woodwork applies to Categorical columns during full
+                        # planning, so DuckDB loads ENUM regardless of schema_only_entityset.
+                        # Primary/foreign keys are deliberately left as strings: they are only
+                        # join columns, never feature values, and converting high-cardinality
+                        # keys to category is expensive.
+                        if not isinstance(df[col_schema.name].dtype, pd.CategoricalDtype):
+                            df[col_schema.name] = df[col_schema.name].astype("category")
 
             index_col = self._get_table_index(table_meta)
             if index_col == "__index__" and "__index__" not in df.columns:
