@@ -148,20 +148,13 @@ class DFSSession:
 
         if not self._prepared:
             self._plan_and_ingest_rdb(target_df_for_engine)
+        else:
+            self._ingest_target(target_df_for_engine)
 
         assert self._builder is not None
         assert self._features is not None
         assert self._sqls is not None
         assert self._sql_column_order is not None
-
-        self._engine.ingest_or_replace_target(
-            self._builder,
-            target_df_for_engine,
-            target_index,
-            self._cutoff_time_column,
-            replace=True,
-        )
-        self.n_target_ingest_calls += 1
 
         feature_matrix = self._engine.execute_and_assemble(
             self._sqls,
@@ -275,6 +268,17 @@ class DFSSession:
                     ) from exc
         return out
 
+    def _ingest_target(self, target_df_for_engine: pd.DataFrame) -> None:
+        assert self._builder is not None
+        self._engine.ingest_or_replace_target(
+            self._builder,
+            target_df_for_engine,
+            "__target_index__",
+            self._cutoff_time_column,
+            replace=True,
+        )
+        self.n_target_ingest_calls += 1
+
     def _plan_and_ingest_rdb(self, target_df_for_engine: pd.DataFrame) -> None:
         features = self._engine.prepare_features(
             self._rdb,
@@ -305,14 +309,7 @@ class DFSSession:
         self._builder = builder
         self._engine_path = engine_path
         self._engine.ingest_rdb_tables(builder, self._rdb)
-
-        # features2sql needs cutoff / time-index *names*; table contents are loaded in compute().
-        if self._config.use_cutoff_time and self._cutoff_time_column is not None:
-            from ..dataset.meta import RDBCutoffTime
-
-            builder.cutoff_time_col_name = RDBCutoffTime.column_name.value
-            builder.cutoff_time_table_name = RDBCutoffTime.table_name.value
-            builder.time_columns["__target__"] = self._cutoff_time_column
+        self._ingest_target(target_df_for_engine)
 
         sqls, column_order, cutoff_time_col_name = self._engine.plan_feature_sqls(
             builder,
