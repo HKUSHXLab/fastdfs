@@ -123,9 +123,14 @@ class DFSSession:
         self._plan_and_ingest_rdb(target_df_for_engine)
 
     def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame:
-        """Compute DFS features for one target frame, reusing warm state when available."""
+        """Compute DFS features for one target frame, reusing warm state when available.
+
+        Once the session is prepared, an empty target still returns the frozen
+        feature columns (with zero rows), so every split has the same columns.
+        """
         self._ensure_open()
-        if len(target_dataframe) == 0:
+        # Planning needs rows; before the first plan, match one-shot and return as-is.
+        if len(target_dataframe) == 0 and not self._prepared:
             return target_dataframe
 
         target_df_with_index, target_df_for_engine = self._prepare_target_frame(

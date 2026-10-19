@@ -231,3 +231,18 @@ def test_session_close_removes_temp_engine_path(tiny_rdb, dfs_config, train_targ
         temp_path = session._temp_db_path
         assert temp_path is not None and os.path.exists(temp_path)
     assert not os.path.exists(temp_path)
+
+
+def test_session_empty_split_keeps_feature_columns(tiny_rdb, dfs_config, train_target):
+    with DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=dfs_config,
+    ) as session:
+        train_out = session.compute(train_target.copy())
+        empty_out = session.compute(train_target.iloc[:0])
+
+    assert len(empty_out) == 0
+    assert all(c in empty_out.columns for c in session.feature_columns_)
+    pd.testing.assert_series_equal(empty_out.dtypes, train_out.dtypes)
