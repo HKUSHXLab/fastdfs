@@ -16,7 +16,7 @@ from pathlib import Path
 from fastdfs.dfs import DFSConfig, get_dfs_engine, FeaturetoolsEngine, DFS2SQLEngine
 from fastdfs.dfs.base_engine import Quantile25, Quantile75, DiscreteEntropy
 from fastdfs.dataset.rdb import RDB
-from fastdfs.api import load_rdb, compute_dfs_features, DFSPipeline
+from fastdfs.api import load_rdb, compute_dfs_features, create_rdb, DFSPipeline
 
 
 @pytest.fixture
@@ -465,6 +465,36 @@ class TestDFS2SQLEngine:
 
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)
+
+    def test_num_unique_primitive(self):
+        """num_unique should compile to COUNT(DISTINCT ...) and ignore NULLs like pandas nunique."""
+        users = pd.DataFrame({"user_id": [1, 2, 3]})
+        events = pd.DataFrame({
+            "event_id": [10, 11, 12, 13, 14, 15, 16],
+            "user_id": [1, 1, 1, 2, 2, 3, 3],
+            "kind": ["a", "b", "a", "c", None, "d", "d"],
+        })
+        rdb = create_rdb(
+            tables={"user": users, "event": events},
+            primary_keys={"user": "user_id", "event": "event_id"},
+            foreign_keys=[("event", "user_id", "user", "user_id")],
+        )
+        config = DFSConfig(
+            engine="dfs2sql",
+            engine_path=":memory:",
+            max_depth=2,
+            agg_primitives=["num_unique"],
+        )
+
+        result_df = compute_dfs_features(
+            rdb,
+            pd.DataFrame({"user_id": [1, 2, 3]}),
+            key_mappings={"user_id": "user.user_id"},
+            config=config,
+        )
+
+        expected = events.groupby("user_id")["kind"].nunique()
+        assert result_df["d2__user.NUM_UNIQUE(event.kind)"].tolist() == expected.loc[[1, 2, 3]].tolist()
 
 
 class TestEngineComparison:
