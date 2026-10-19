@@ -302,3 +302,18 @@ def test_session_retry_after_failed_first_compute(
 
     assert list(tmp_path.glob("fastdfs_*.db*")) == []
     assert db_path.exists() == user_engine_path
+
+
+def test_session_compute_does_not_modify_target(tiny_rdb, dfs_config, train_target):
+    target = train_target.assign(label=[0, 1])
+    snapshot = target.copy(deep=True)
+    with DFSSession(
+        tiny_rdb,
+        {"user_id": "user.user_id"},
+        cutoff_time_column="timestamp",
+        config=dfs_config,
+    ) as session:
+        out = session.compute(target)
+
+    assert out["user_id"].dtype == object  # keys were coerced in the output...
+    pd.testing.assert_frame_equal(target, snapshot)  # ...but not in the caller's frame

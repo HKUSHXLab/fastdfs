@@ -168,8 +168,9 @@ class DFSSession:
     def _prepare_target_frame(
         self, target_dataframe: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        # Copy so key coercion does not mutate the caller's frame across splits.
-        frame = target_dataframe.copy()
+        # Shallow copy: key coercion replaces columns in the copy only, so the caller's
+        # frame is untouched without duplicating all of its (possibly wide) data.
+        frame = target_dataframe.copy(deep=False)
         coerce_target_key_types(self._rdb, frame, self._key_mappings)
         target_df_with_index, target_df_for_engine = self._engine._prepare_target_for_engine(
             frame, self._key_mappings, self._cutoff_time_column
