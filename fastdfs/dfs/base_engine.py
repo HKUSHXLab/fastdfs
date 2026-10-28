@@ -6,6 +6,8 @@ target dataframes and simplified RDB datasets, removing the dependency on tasks.
 """
 
 import abc
+import difflib
+import warnings
 from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
 import featuretools as ft
@@ -53,6 +55,16 @@ def dfs_feature_renames(features: List[ft.FeatureBase]) -> Dict[str, str]:
         if old != new:
             renames[old] = new
     return renames
+
+
+def _warn_unknown_config_keys(keys, known, where: str) -> None:
+    """Warn once per key that is not a DFSConfig field (such keys are ignored)."""
+    for key in keys:
+        if key in known:
+            continue
+        close = difflib.get_close_matches(str(key), list(known), n=1)
+        hint = f" Did you mean '{close[0]}'?" if close else ""
+        warnings.warn(f"Unknown DFSConfig key '{key}' in {where} is ignored.{hint}", UserWarning)
 
 
 def to_naive_datetime(series: pd.Series) -> pd.Series:
@@ -220,6 +232,14 @@ class DFSConfig(pydantic.BaseModel):
     dfs2sql_temp_directory: Optional[str] = None
     include_cutoff_time: bool = False
 
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_keys(cls, data: Any) -> Any:
+        # Unknown keys are ignored (pydantic's default); warn so typos are noticed.
+        if isinstance(data, dict):
+            _warn_unknown_config_keys(data, cls.model_fields, "DFSConfig")
+        return data
+
 
 class DFSEngine:
     """Base class for DFS computation engines."""
@@ -256,8 +276,10 @@ class DFSEngine:
         # Merge config overrides
         effective_config = self.config.model_copy(deep=True)
         if config_overrides:
+            _warn_unknown_config_keys(config_overrides, DFSConfig.model_fields, "config_overrides")
             for key, value in config_overrides.items():
-                if hasattr(effective_config, key):
+                # Only declared fields: hasattr() would also accept methods like copy.
+                if key in DFSConfig.model_fields:
                     setattr(effective_config, key, value)
 
         return self._compute_features_impl(

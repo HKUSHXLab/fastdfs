@@ -241,6 +241,8 @@ class DFSConfig(pydantic.BaseModel):
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation
 
+Unknown keys, passed to `DFSConfig(...)` or in `config_overrides`, are ignored with a `UserWarning` that names the key and suggests the closest field (e.g. `max_dpeth` → `max_depth`). To make them errors: `warnings.filterwarnings("error", message="Unknown DFSConfig key")`.
+
 **Aggregation primitives:** See **[Aggregation Primitives](aggregation_primitives.md)** for defaults, FastDFS-specific primitives (`quantile_25`, `quantile_75`, `discrete_entropy`), dfs2sql vs featuretools support, SQL mappings, and categorical encoding notes.
 
 **Example:**
