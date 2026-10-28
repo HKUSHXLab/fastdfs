@@ -441,3 +441,38 @@ def test_bad_duckdb_setting_leaves_no_temp_file(
                 cutoff_time_column="timestamp", config=config,
             )
     assert _temp_db_files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "make_empty",
+    [
+        lambda train: train.iloc[:0],
+        lambda train: pd.DataFrame({"user_id": [], "timestamp": []}),  # float64 columns
+        lambda train: pd.DataFrame(columns=["user_id", "timestamp"]),  # object columns
+    ],
+    ids=["iloc", "float64 columns", "object columns"],
+)
+def test_session_empty_later_split_keeps_frozen_columns(tiny_rdb, dfs_config, train_target, make_empty):
+    with DFSSession(
+        tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        train_out = session.compute(train_target.copy())
+        empty_out = session.compute(make_empty(train_target))
+
+    assert len(empty_out) == 0
+    assert list(empty_out.columns) == list(train_out.columns)
+    features = session.feature_columns_
+    pd.testing.assert_series_equal(empty_out[features].dtypes, train_out[features].dtypes)
+
+
+def test_session_split_missing_cutoff_column_raises_even_if_empty(tiny_rdb, dfs_config, train_target):
+    with DFSSession(
+        tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        session.compute(train_target.copy())
+        missing = train_target.drop(columns="timestamp")
+        with pytest.raises(KeyError) as non_empty:
+            session.compute(missing)
+        with pytest.raises(KeyError) as empty:
+            session.compute(missing.iloc[:0])
+    assert type(empty.value) is type(non_empty.value)

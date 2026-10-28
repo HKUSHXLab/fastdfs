@@ -70,9 +70,10 @@ class DFSSession:
         self._sql_column_order: Optional[List[str]] = None
         self._cutoff_time_col_name: Optional[str] = None
         self._feature_renames: Dict[str, str] = {}
-        # Whether the first split's cutoff was numeric; later splits must match,
-        # because the frozen SQL compares cutoffs with the RDB's time columns.
-        self._cutoff_is_numeric: Optional[bool] = None
+        # The first split's cutoff dtype. Later splits must have the same kind
+        # (numeric or datetime), because the frozen SQL compares cutoffs with the
+        # RDB's time columns; empty later splits are cast to it.
+        self._cutoff_dtype: Optional[Any] = None
         self.feature_columns_: Optional[List[str]] = None
         self.n_features_: int = 0
 
@@ -125,21 +126,31 @@ class DFSSession:
             target_dataframe
         )
 
-        cutoff_is_numeric = self._cutoff_time_column is not None and pd.api.types.is_numeric_dtype(
-            target_df_for_engine[self._cutoff_time_column]
-        )
-        if self._prepared and cutoff_is_numeric != self._cutoff_is_numeric:
-            kinds = {True: "numeric", False: "datetime"}
-            raise DFSSessionError(
-                f"Cutoff time column '{self._cutoff_time_column}' is "
-                f"{kinds[cutoff_is_numeric]} in this split but was "
-                f"{kinds[self._cutoff_is_numeric]} in the first split; all splits must use the same kind."
-            )
+        cutoff_col = self._cutoff_time_column
+        if self._prepared and cutoff_col is not None:
+            if len(target_df_for_engine) == 0:
+                # An empty frame's dtype is arbitrary (e.g. float64 for pd.DataFrame
+                # with no rows); there are no values to misread, so cast it.
+                target_df_for_engine[cutoff_col] = target_df_for_engine[cutoff_col].astype(
+                    self._cutoff_dtype
+                )
+            else:
+                is_numeric = pd.api.types.is_numeric_dtype
+                this_kind, first_kind = (
+                    "numeric" if is_numeric(dtype) else "datetime"
+                    for dtype in (target_df_for_engine[cutoff_col].dtype, self._cutoff_dtype)
+                )
+                if this_kind != first_kind:
+                    raise DFSSessionError(
+                        f"Cutoff time column '{cutoff_col}' is {this_kind} in this split but was "
+                        f"{first_kind} in the first split; all splits must use the same kind."
+                    )
 
         just_planned = not self._prepared
         if just_planned:
             self._plan_and_ingest_rdb(target_df_for_engine)
-            self._cutoff_is_numeric = cutoff_is_numeric
+            if cutoff_col is not None:
+                self._cutoff_dtype = target_df_for_engine[cutoff_col].dtype
         if not self._features:
             # Match one-shot: no features means the target comes back unchanged.
             return target_df_with_index.drop(columns="__target_index__")
