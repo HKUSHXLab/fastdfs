@@ -37,13 +37,13 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,
     key_mappings=key_mappings,
     cutoff_time_column="interaction_time",
-    config_overrides={
-        "engine": "dfs2sql",
-        "engine_path": ":memory:",
-        "dfs2sql_sql_workers": 2,
-        "dfs2sql_threads": 8,
-        "dfs2sql_memory_limit": "4GB",
-    },
+    config=fastdfs.DFSConfig(
+        engine="dfs2sql",
+        engine_path=":memory:",
+        dfs2sql_sql_workers=2,
+        dfs2sql_threads=8,
+        dfs2sql_memory_limit="4GB",
+    ),
 )
 ```
 

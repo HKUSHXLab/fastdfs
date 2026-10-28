@@ -308,9 +308,11 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,        # Dataframe to augment
     key_mappings=key_mappings,         # Column mappings
     cutoff_time_column="timestamp",    # Optional: temporal cutoff
-    config_overrides={                 # Optional: DFS parameters
+    config=fastdfs.DFSConfig(          # Optional: engine and other settings
+        engine="dfs2sql",              # (the engine must be set here, not in config_overrides)
+    ),
+    config_overrides={                 # Optional: per-call DFS parameters
         "max_depth": 2,
-        "engine": "featuretools",
         "agg_primitives": ["count", "mean", "max", "min"]
     }
 )
