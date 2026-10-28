@@ -14,6 +14,7 @@ import duckdb
 import featuretools as ft
 import pandas as pd
 import tqdm
+import woodwork as ww
 from loguru import logger
 from sql_formatter.core import format_sql
 
@@ -116,6 +117,38 @@ def release_duckdb(db: duckdb.DuckDBPyConnection, temp_db_path: Optional[str]) -
             logger.debug(f"Could not remove temp DuckDB file {temp_db_path}: {exc}")
 
 
+def _raise_on_lost_values(
+    table_name: str, col_schema, original: pd.Series, converted: pd.Series
+) -> None:
+    """Raise if converting a column turned values that were present into missing ones.
+
+    Planning sees 0-row frames, so woodwork no longer rejects such values as it did
+    with full frames. Strings woodwork treats as missing ("nan", "None", "", ...)
+    count as missing here too, so the same inputs are accepted as before.
+    """
+    if converted.isna().sum() == original.isna().sum():
+        return
+    candidates = original[
+        converted.isna().to_numpy()
+        & original.notna().to_numpy()
+        & ~original.isin(ww.config.get_option("nan_values")).to_numpy()
+    ]
+    parse = pd.to_datetime if col_schema.dtype == RDBColumnDType.datetime_t else pd.to_numeric
+    for value in candidates.unique():
+        # A value that parses to a missing value on its own (e.g. "NaT") is missing,
+        # not lost. Anything else failed to convert: unparseable, or in a format the
+        # column-wide parse rejected (e.g. "2020-01-02" among "2020-01-01 10:00").
+        try:
+            if pd.isna(parse(value)):
+                continue
+        except (ValueError, TypeError):
+            pass
+        raise ValueError(
+            f"Column '{table_name}.{col_schema.name}' ({col_schema.dtype.value}) has values "
+            f"that cannot be converted, e.g. {value!r}"
+        )
+
+
 @dfs_engine
 class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
@@ -151,6 +184,10 @@ class DFS2SQLEngine(DFSEngine):
         - ``datetime`` -> naive datetime (TIMESTAMP_NS); timezones are dropped and
           the wall time kept.
         - ``timestamp`` -> numeric.
+        - Values that cannot be converted to their type (e.g. ``"x"`` in a ``float``
+          column) raise a ``ValueError``; missing values, including strings woodwork
+          treats as missing such as ``"nan"``, are allowed.
+        - Primary keys must be unique and non-null; an ``IndexError`` is raised otherwise.
         - ``text`` and primary/foreign keys are loaded as they are (keys are strings,
           so VARCHAR). Keys are only join columns, never feature values, and
           converting high-cardinality keys to category is expensive. One visible
@@ -165,23 +202,41 @@ class DFS2SQLEngine(DFSEngine):
             table_meta = rdb.get_table_metadata(table_name)
 
             for col_schema in table_meta.columns:
-                if col_schema.name in df.columns:
-                    if col_schema.dtype == RDBColumnDType.float_t:
-                        # float64 like woodwork's Double, also for float32/int columns.
-                        df[col_schema.name] = pd.to_numeric(
-                            df[col_schema.name], errors='coerce'
-                        ).astype("float64")
-                    elif col_schema.dtype == RDBColumnDType.datetime_t:
-                        df[col_schema.name] = to_naive_datetime(df[col_schema.name])
-                    elif col_schema.dtype == RDBColumnDType.timestamp_t:
-                        df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
-                    elif col_schema.dtype == RDBColumnDType.category_t:
-                        if not isinstance(df[col_schema.name].dtype, pd.CategoricalDtype):
-                            df[col_schema.name] = df[col_schema.name].astype("category")
+                if col_schema.name not in df.columns:
+                    continue
+                original = df[col_schema.name]
+                if col_schema.dtype == RDBColumnDType.float_t:
+                    # float64 like woodwork's Double, also for float32/int columns.
+                    converted = pd.to_numeric(original, errors='coerce').astype("float64")
+                elif col_schema.dtype == RDBColumnDType.datetime_t:
+                    converted = to_naive_datetime(original)
+                elif col_schema.dtype == RDBColumnDType.timestamp_t:
+                    converted = pd.to_numeric(original, errors='coerce')
+                elif col_schema.dtype == RDBColumnDType.category_t:
+                    if not isinstance(original.dtype, pd.CategoricalDtype):
+                        df[col_schema.name] = original.astype("category")
+                    continue
+                else:
+                    continue
+                _raise_on_lost_values(table_name, col_schema, original, converted)
+                df[col_schema.name] = converted
 
             index_col = self._get_table_index(table_meta)
             if index_col == "__index__" and "__index__" not in df.columns:
                 df["__index__"] = range(len(df))
+            else:
+                # Planning sees 0-row frames, so woodwork no longer validates keys.
+                # Same checks (and messages) as woodwork's index check on master.
+                keys = df[index_col]
+                if not keys.is_unique:
+                    raise IndexError(
+                        f"Index column must be unique: primary key '{table_name}.{index_col}' "
+                        f"has duplicate values, e.g. {keys[keys.duplicated()].iloc[0]!r}"
+                    )
+                if keys.isnull().any():
+                    raise IndexError(
+                        f"Index contains null values: primary key '{table_name}.{index_col}'"
+                    )
 
             builder.add_dataframe(
                 dataframe_name=table_name,
