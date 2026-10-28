@@ -392,3 +392,52 @@ def test_session_rejects_cutoff_kind_change(tiny_rdb, dfs_config, train_target):
         # A split whose cutoffs are all missing is rejected like in one-shot.
         with pytest.raises(ValueError, match="Cutoff time column 'timestamp' has values that cannot be parsed"):
             session.compute(pd.DataFrame({"user_id": [1, 2], "timestamp": [None, None]}))
+
+
+def test_session_rejects_all_missing_datetime_cutoffs(tiny_rdb, dfs_config, train_target):
+    # A datetime64 column of only NaT passes woodwork's datetime check by dtype;
+    # one-shot planning rejects it, so a later session split must too.
+    all_nat = pd.DataFrame({"user_id": [1, 2], "timestamp": pd.to_datetime([None, None])})
+    with pytest.raises((TypeError, ValueError)):
+        compute_dfs_features(
+            tiny_rdb, all_nat.copy(), {"user_id": "user.user_id"},
+            cutoff_time_column="timestamp", config=dfs_config,
+        )
+    with DFSSession(
+        tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        session.compute(train_target.copy())
+        with pytest.raises(ValueError, match="Cutoff time column 'timestamp'"):
+            session.compute(all_nat.copy())
+
+
+def test_session_empty_split_with_string_cutoffs(tiny_rdb, dfs_config):
+    train = pd.DataFrame({"user_id": [1, 2], "timestamp": ["2020-01-05", "2020-01-05"]})
+    with DFSSession(
+        tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        train_out = session.compute(train)
+        empty_out = session.compute(train.iloc[:0])
+
+    assert len(empty_out) == 0
+    assert list(empty_out.columns) == list(train_out.columns)
+
+
+@pytest.mark.parametrize("use_session", [False, True])
+def test_bad_duckdb_setting_leaves_no_temp_file(
+    tmp_path, monkeypatch, tiny_rdb, dfs_config, train_target, use_session
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    config = dfs_config.model_copy(update={"engine_path": None, "dfs2sql_memory_limit": "bogus"})
+    with pytest.raises(Exception, match="(?i)memory"):
+        if use_session:
+            with DFSSession(
+                tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=config
+            ) as session:
+                session.compute(train_target.copy())
+        else:
+            compute_dfs_features(
+                tiny_rdb, train_target.copy(), {"user_id": "user.user_id"},
+                cutoff_time_column="timestamp", config=config,
+            )
+    assert _temp_db_files(tmp_path) == []

@@ -365,8 +365,11 @@ class DFSEngine:
         if cutoff_time_column:
             cutoff = target_df_for_engine[cutoff_time_column]
             # Reject values woodwork would reject for a time index: a NaT cutoff
-            # would silently match no history.
-            if not is_valid_time_column(cutoff):
+            # would silently match no history. Check all-missing explicitly too,
+            # because col_is_datetime accepts an all-NaT datetime64 column by dtype
+            # (one-shot planning still rejects it, but a session only plans once).
+            # An empty split has nothing to check.
+            if len(cutoff) and (cutoff.isna().all() or not is_valid_time_column(cutoff)):
                 raise ValueError(
                     f"Cutoff time column '{cutoff_time_column}' has values that cannot be "
                     f"parsed as datetimes (or has no values)."

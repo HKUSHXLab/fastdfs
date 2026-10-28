@@ -142,13 +142,18 @@ class DFS2SQLEngine(DFSEngine):
             logger.debug(f"Using temporary DuckDB path: {engine_path}")
 
         builder = DuckDBBuilder(Path(engine_path))
-        for setting, value in (
-            ("threads", config.dfs2sql_threads),
-            ("memory_limit", config.dfs2sql_memory_limit),
-            ("temp_directory", config.dfs2sql_temp_directory),
-        ):
-            if value is not None:
-                builder.db.execute(f"SET {setting} = ?", [value])
+        try:
+            for setting, value in (
+                ("threads", config.dfs2sql_threads),
+                ("memory_limit", config.dfs2sql_memory_limit),
+                ("temp_directory", config.dfs2sql_temp_directory),
+            ):
+                if value is not None:
+                    builder.db.execute(f"SET {setting} = ?", [value])
+        except BaseException:
+            # The caller never gets the builder, so close it and remove a temp file here.
+            release_duckdb(builder.db, engine_path if config.engine_path is None else None)
+            raise
         return builder, engine_path
 
     def ingest_rdb_tables(self, builder: DuckDBBuilder, rdb: RDB) -> None:
