@@ -341,3 +341,50 @@ def test_rdb_tables_without_primary_key_not_modified(target):
 
     pd.testing.assert_series_equal(rdb.get_table("logs").dtypes, before)
     assert "__index__" not in rdb.get_table("logs").columns
+
+
+def _self_referential_rdb():
+    """post.parent_id references post.post_id; the EntitySet skips that relationship,
+    so featuretools plans features on parent_id as a categorical value."""
+    return create_rdb(
+        tables={
+            "user": pd.DataFrame({"user_id": ["u1", "u2"]}),
+            "post": pd.DataFrame(
+                {
+                    "post_id": ["p1", "p2", "p3"],
+                    "user_id": ["u1", "u1", "u2"],
+                    "parent_id": [None, "p1", "p2"],
+                    "ts": pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]),
+                }
+            ),
+        },
+        primary_keys={"user": "user_id", "post": "post_id"},
+        foreign_keys=[("post", "user_id", "user", "user_id"), ("post", "parent_id", "post", "post_id")],
+        time_columns={"post": "ts"},
+    )
+
+
+@pytest.mark.parametrize(
+    "target, keys, column, expected",
+    [
+        (pd.DataFrame({"user_id": ["u1", "u2"]}), {"user_id": "user.user_id"}, "d2__user.MODE(post.parent_id)", ["p1", "p2"]),
+        (pd.DataFrame({"post_id": ["p2", "p3"]}), {"post_id": "post.post_id"}, "d1__post.parent_id", ["p1", "p2"]),
+    ],
+    ids=["MODE over the key", "key read directly"],
+)
+def test_self_referential_key_features_are_category(target, keys, column, expected):
+    # Full-frame planning made every key categorical, so features that read a key
+    # as a value came out as category; they must not turn into object.
+    config = DFSConfig(engine="dfs2sql", engine_path=":memory:", agg_primitives=["count", "mode"])
+    one_shot = compute_dfs_features(_self_referential_rdb(), target.copy(), keys, config=config)
+    with DFSSession(_self_referential_rdb(), keys, config=config) as session:
+        in_session = session.compute(target.copy())
+    reference = compute_dfs_features(
+        _self_referential_rdb(), target.copy(), keys,
+        config=DFSConfig(engine="featuretools", agg_primitives=["count", "mode"]),
+    )
+    for out in (one_shot, in_session):
+        assert isinstance(out[column].dtype, pd.CategoricalDtype)
+        assert out[column].astype(str).tolist() == expected
+    assert reference[column].astype(str).tolist() == expected
+    assert isinstance(reference[column].dtype, pd.CategoricalDtype)

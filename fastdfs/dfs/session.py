@@ -244,7 +244,7 @@ class DFSSession:
         temp_db_path = engine_path if self._config.engine_path is None else None
         finalizer = weakref.finalize(self, release_duckdb, builder.db, temp_db_path)
         try:
-            self._engine.ingest_rdb_tables(builder, self._rdb)
+            self._engine.ingest_rdb_tables(builder, self._rdb, features)
             self._ingest_target(builder, target_df_for_engine)
             sqls, column_order, cutoff_time_col_name = self._engine.plan_feature_sqls(
                 builder,

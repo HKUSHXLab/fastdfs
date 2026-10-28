@@ -8,7 +8,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import duckdb
 import featuretools as ft
@@ -128,6 +128,32 @@ def _first_non_float(series: pd.Series) -> Any:
     return None
 
 
+def _foreign_keys_read_as_values(
+    rdb: RDB, features: List[ft.FeatureBase]
+) -> Set[Tuple[str, str]]:
+    """(table, column) of foreign keys that a planned feature reads as a value.
+
+    Keys normally only join tables, but featuretools builds features on a foreign key
+    whose relationship the EntitySet does not register (e.g. a self-referential one,
+    like posts.ParentId). Decided from the plan, not from which relationships exist.
+    Primary keys are left out: features read them only to count rows (COUNT).
+    """
+    read = {
+        (dep.dataframe_name, dep.column_name)
+        for feature in features
+        for dep in [feature, *feature.get_dependencies(deep=True)]
+        if isinstance(dep, ft.IdentityFeature)
+    }
+    value_keys = set()
+    for table_name, col_name in read:
+        if table_name not in rdb.table_names:
+            continue  # e.g. the __target__ table
+        col_schema = rdb.get_table_metadata(table_name).column_dict.get(col_name)
+        if col_schema is not None and RDBColumnDType(col_schema.dtype) == RDBColumnDType.foreign_key:
+            value_keys.add((table_name, col_name))
+    return value_keys
+
+
 @dfs_engine
 class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
@@ -157,7 +183,9 @@ class DFS2SQLEngine(DFSEngine):
             raise
         return builder, engine_path
 
-    def ingest_rdb_tables(self, builder: DuckDBBuilder, rdb: RDB) -> None:
+    def ingest_rdb_tables(
+        self, builder: DuckDBBuilder, rdb: RDB, features: List[ft.FeatureBase]
+    ) -> None:
         """Load all RDB tables into DuckDB (once per warm session).
 
         This is the only place that sets the column types DuckDB computes on. Types
@@ -175,13 +203,18 @@ class DFS2SQLEngine(DFSEngine):
         - ``text`` -> woodwork ``NaturalLanguage`` -> pandas ``string`` (VARCHAR), whatever
           mix of Python types the column holds.
         - Primary keys must be unique and non-null; an ``IndexError`` is raised otherwise.
-        - Primary/foreign keys are loaded as they are (``canonicalize_key_types`` makes
-          them strings, so VARCHAR). Keys are only join columns, never feature values, and
-          converting high-cardinality keys to category is expensive. One visible
+        - A foreign key that a planned feature reads as a value (``features``; e.g. a
+          self-referential key, whose relationship the EntitySet skips) -> woodwork
+          ``Categorical`` -> ``category`` (ENUM), so the feature's dtype matches
+          full-frame planning, which made every key categorical.
+        - Other primary/foreign keys are loaded as they are (``canonicalize_key_types``
+          makes them strings, so VARCHAR). They only join tables, and converting
+          high-cardinality keys to category is expensive. One visible
           effect: DuckDB's ``mode()`` has no fixed tie-break, so a ``MODE`` feature
           with tied counts may pick a different value than full Featuretools
           planning did (which turned keys into ENUM).
         """
+        value_keys = _foreign_keys_read_as_values(rdb, features)
         for table_name in rdb.table_names:
             # Shallow copy: converted columns replace columns in the copy only, so the
             # caller's RDB DataFrames are never modified (data is not duplicated).
@@ -215,6 +248,8 @@ class DFS2SQLEngine(DFSEngine):
                 elif col_schema.dtype == RDBColumnDType.category_t:
                     if not isinstance(original.dtype, pd.CategoricalDtype):
                         df[col_schema.name] = original.astype("category")
+                elif (table_name, col_schema.name) in value_keys:
+                    df[col_schema.name] = ww.logical_types.Categorical().transform(original)
                 elif col_schema.dtype == RDBColumnDType.text_t:
                     # No feature reads text, but DuckDB guesses an object column's type
                     # from its first rows and fails on later values that don't fit.
@@ -384,7 +419,7 @@ class DFS2SQLEngine(DFSEngine):
         target_index = "__target_index__"
         builder, engine_path = self.open_builder(config)
         try:
-            self.ingest_rdb_tables(builder, rdb)
+            self.ingest_rdb_tables(builder, rdb, features)
             self.ingest_or_replace_target(
                 builder, target_dataframe, target_index, cutoff_time_column, list(key_mappings)
             )
