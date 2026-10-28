@@ -63,15 +63,12 @@ class DFSSession:
         self._engine: DFS2SQLEngine = get_dfs_engine("dfs2sql", effective)  # type: ignore[assignment]
 
         self._builder: Optional[DuckDBBuilder] = None
-        # Set only when the session generated the DB path itself; close() deletes it.
-        self._temp_db_path: Optional[str] = None
         # Runs release_duckdb on close(), garbage collection or interpreter exit, at most once.
         self._finalizer: Optional[weakref.finalize] = None
         self._features: Optional[List[Any]] = None
         self._sqls: Optional[List[Any]] = None
         self._sql_column_order: Optional[List[str]] = None
         self._cutoff_time_col_name: Optional[str] = None
-        self._pinned_dtypes: Dict[str, Any] = {}
         self._feature_renames: Dict[str, str] = {}
         self.feature_columns_: Optional[List[str]] = None
         self.n_features_: int = 0
@@ -103,7 +100,6 @@ class DFSSession:
         if self._finalizer is not None:
             self._finalizer()
         self._builder = None
-        self._temp_db_path = None
 
     def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame:
         """Compute DFS features for one target frame, reusing warm state when available.
@@ -181,30 +177,7 @@ class DFSSession:
         target_df_with_index, target_df_for_engine = self._engine._prepare_target_for_engine(
             frame, self._key_mappings, self._cutoff_time_column
         )
-        return target_df_with_index, self._apply_pinned_dtypes(target_df_for_engine)
-
-    def _pin_dtypes_from(self, target_df: pd.DataFrame) -> None:
-        cols = list(self._key_mappings.keys())
-        if self._cutoff_time_column:
-            cols.append(self._cutoff_time_column)
-        self._pinned_dtypes = {c: target_df[c].dtype for c in cols if c in target_df.columns}
-
-    def _apply_pinned_dtypes(self, target_df: pd.DataFrame) -> pd.DataFrame:
-        if not self._pinned_dtypes:
-            self._pin_dtypes_from(target_df)
-            return target_df
-        out = target_df
-        for col, dtype in self._pinned_dtypes.items():
-            if col not in out.columns:
-                continue
-            if out[col].dtype != dtype:
-                try:
-                    out[col] = out[col].astype(dtype)
-                except (TypeError, ValueError) as exc:
-                    raise DFSSessionError(
-                        f"Failed to coerce target column '{col}' to pinned dtype {dtype}: {exc}"
-                    ) from exc
-        return out
+        return target_df_with_index, target_df_for_engine
 
     def _ingest_target(self, builder: DuckDBBuilder, target_df_for_engine: pd.DataFrame) -> None:
         self._engine.ingest_or_replace_target(
@@ -212,6 +185,7 @@ class DFSSession:
             target_df_for_engine,
             "__target_index__",
             self._cutoff_time_column,
+            list(self._key_mappings),
             replace=True,
         )
         self._n_target_ingest_calls += 1
@@ -258,7 +232,6 @@ class DFSSession:
             raise
 
         self._builder = builder
-        self._temp_db_path = temp_db_path
         self._finalizer = finalizer
         self._sqls = sqls
         self._sql_column_order = column_order

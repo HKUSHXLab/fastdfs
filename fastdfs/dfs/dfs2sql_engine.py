@@ -196,10 +196,25 @@ class DFS2SQLEngine(DFSEngine):
         target_dataframe: pd.DataFrame,
         target_index: str,
         cutoff_time_column: Optional[str],
+        key_columns: List[str],
         *,
         replace: bool = False,
     ) -> None:
-        """Load or replace ``__target__`` (+ cutoff helper) for the current split."""
+        """Load or replace ``__target__`` (+ cutoff helper) for the current split.
+
+        Key and cutoff columns get explicit types, so every split loads with the
+        same DuckDB types, even when it is empty or its keys are all missing (an
+        ``object`` column with no strings would otherwise load as INTEGER).
+        """
+        target_dataframe = target_dataframe.copy(deep=False)
+        for key_col in key_columns:
+            target_dataframe[key_col] = target_dataframe[key_col].astype("string")
+        if cutoff_time_column and pd.api.types.is_datetime64_any_dtype(
+            target_dataframe[cutoff_time_column]
+        ):
+            target_dataframe[cutoff_time_column] = target_dataframe[cutoff_time_column].astype(
+                "datetime64[ns]"
+            )
         builder.add_dataframe(
             dataframe_name="__target__",
             dataframe=target_dataframe,
@@ -322,7 +337,7 @@ class DFS2SQLEngine(DFSEngine):
         try:
             self.ingest_rdb_tables(builder, rdb)
             self.ingest_or_replace_target(
-                builder, target_dataframe, target_index, cutoff_time_column
+                builder, target_dataframe, target_index, cutoff_time_column, list(key_mappings)
             )
             sqls, column_order, cutoff_time_col_name = self.plan_feature_sqls(
                 builder, features, cutoff_time_column, config

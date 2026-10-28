@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gc
-import os
 import tempfile
 
 import pandas as pd
@@ -202,7 +201,14 @@ def test_session_close_keeps_user_engine_path(tmp_path, tiny_rdb, dfs_config, tr
     assert db_path.exists()
 
 
-def test_session_close_removes_temp_engine_path(tiny_rdb, dfs_config, train_target):
+def _temp_db_files(tmp_path):
+    return sorted(p.name for p in tmp_path.glob("fastdfs_*"))
+
+
+def test_session_close_removes_temp_engine_path(
+    tmp_path, monkeypatch, tiny_rdb, dfs_config, train_target
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     config = dfs_config.model_copy(update={"engine_path": None})
     with DFSSession(
         tiny_rdb,
@@ -211,9 +217,8 @@ def test_session_close_removes_temp_engine_path(tiny_rdb, dfs_config, train_targ
         config=config,
     ) as session:
         session.compute(train_target.copy())
-        temp_path = session._temp_db_path
-        assert temp_path is not None and os.path.exists(temp_path)
-    assert not os.path.exists(temp_path)
+        assert _temp_db_files(tmp_path)
+    assert _temp_db_files(tmp_path) == []
 
 
 def test_session_empty_split_keeps_feature_columns(tiny_rdb, dfs_config, train_target):
@@ -231,7 +236,10 @@ def test_session_empty_split_keeps_feature_columns(tiny_rdb, dfs_config, train_t
     pd.testing.assert_series_equal(empty_out.dtypes, train_out.dtypes)
 
 
-def test_session_without_close_removes_temp_engine_path(tiny_rdb, dfs_config, train_target):
+def test_session_without_close_removes_temp_engine_path(
+    tmp_path, monkeypatch, tiny_rdb, dfs_config, train_target
+):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     config = dfs_config.model_copy(update={"engine_path": None})
     session = DFSSession(
         tiny_rdb,
@@ -240,12 +248,11 @@ def test_session_without_close_removes_temp_engine_path(tiny_rdb, dfs_config, tr
         config=config,
     )
     session.compute(train_target.copy())
-    temp_path = session._temp_db_path
-    assert temp_path is not None and os.path.exists(temp_path)
+    assert _temp_db_files(tmp_path)
 
     del session
     gc.collect()
-    assert not os.path.exists(temp_path)
+    assert _temp_db_files(tmp_path) == []
 
 
 def test_session_garbage_collection_after_close_keeps_user_engine_path(
@@ -334,3 +341,42 @@ def test_session_empty_first_split_raises(tiny_rdb, dfs_config, train_target):
         train_out = session.compute(train_target.copy())
         empty_out = session.compute(train_target.iloc[:0])
         assert list(empty_out.columns) == list(train_out.columns)
+
+
+def test_session_split_with_missing_string_keys(dfs_config):
+    # With string keys, a later split whose key column is empty or all missing
+    # must still load as VARCHAR, not INTEGER, to join with the RDB keys.
+    from fastdfs.api import create_rdb
+
+    rdb = create_rdb(
+        tables={
+            "user": pd.DataFrame({"user_id": ["u1", "u2"], "age": [25.0, 30.0]}),
+            "event": pd.DataFrame(
+                {
+                    "event_id": ["e1", "e2", "e3"],
+                    "user_id": ["u1", "u1", "u2"],
+                    "amount": [5.0, 7.0, 9.0],
+                    "timestamp": pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]),
+                }
+            ),
+        },
+        primary_keys={"user": "user_id", "event": "event_id"},
+        foreign_keys=[("event", "user_id", "user", "user_id")],
+        time_columns={"event": "timestamp"},
+    )
+    cutoff = pd.to_datetime(["2020-01-05"])
+    with DFSSession(
+        rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        train_out = session.compute(pd.DataFrame({"user_id": ["u1"], "timestamp": cutoff}))
+        missing_out = session.compute(
+            pd.DataFrame({"user_id": pd.Series([None], dtype=object), "timestamp": cutoff})
+        )
+        empty_out = session.compute(
+            pd.DataFrame({"user_id": pd.Series([], dtype=object), "timestamp": cutoff[:0]})
+        )
+
+    assert train_out["d2__user.COUNT(event)"].tolist() == [2]
+    assert list(missing_out.columns) == list(train_out.columns)
+    assert missing_out["d1__user.age"].isna().all()
+    assert list(empty_out.columns) == list(train_out.columns)
