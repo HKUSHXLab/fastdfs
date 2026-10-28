@@ -434,8 +434,8 @@ class FeatureBlock:
             key = (dataframe_name, column_name)
             if key in self._column_type_map:
                 dtype_str = str(self._column_type_map[key]).lower()
-                # Check for boolean dtypes
-                if 'bool' in dtype_str or dtype_str in ['boolean', 'bool']:
+                # Exact match: a substring test would also match e.g. ENUM('bool', ...)
+                if dtype_str in ('boolean', 'bool'):
                     return True
 
         return False

@@ -80,8 +80,8 @@ class DFSSession:
         self._closed = False
 
         # Counters for tests / diagnostics
-        self.n_plan_calls = 0
-        self.n_target_ingest_calls = 0
+        self._n_plan_calls = 0
+        self._n_target_ingest_calls = 0
 
     def __enter__(self) -> "DFSSession":
         return self
@@ -214,7 +214,7 @@ class DFSSession:
             self._cutoff_time_column,
             replace=True,
         )
-        self.n_target_ingest_calls += 1
+        self._n_target_ingest_calls += 1
 
     def _plan_and_ingest_rdb(self, target_df_for_engine: pd.DataFrame) -> None:
         features = self._engine.prepare_features(
@@ -224,12 +224,12 @@ class DFSSession:
             self._cutoff_time_column,
             self._config,
         )
-        self.n_plan_calls += 1
+        self._n_plan_calls += 1
         self._features = features
         logger.info(
             "DFSSession: planned {} features (plan call #{})",
             len(features),
-            self.n_plan_calls,
+            self._n_plan_calls,
         )
         if not features:
             logger.warning("No features generated, check your configuration or data.")
@@ -248,8 +248,6 @@ class DFSSession:
             self._ingest_target(builder, target_df_for_engine)
             sqls, column_order, cutoff_time_col_name = self._engine.plan_feature_sqls(
                 builder,
-                self._rdb,
-                target_df_for_engine,
                 features,
                 self._cutoff_time_column,
                 self._config,

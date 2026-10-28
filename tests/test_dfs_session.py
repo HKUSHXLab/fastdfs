@@ -83,8 +83,8 @@ def test_session_reuses_plan_and_rdb_ingest(
         train_out = session.compute(train_target.copy())
         val_out = session.compute(val_target.copy())
 
-        assert session.n_plan_calls == 1
-        assert session.n_target_ingest_calls == 2
+        assert session._n_plan_calls == 1
+        assert session._n_target_ingest_calls == 2
         assert list(train_out.columns) == list(val_out.columns)
         assert session.feature_columns_ is not None
         assert all(c in train_out.columns for c in session.feature_columns_)
@@ -183,7 +183,7 @@ def test_session_zero_features_matches_oneshot(
         train_out = session.compute(train_target.copy())
         val_out = session.compute(val_target.copy())
         assert session.feature_columns_ == []
-        assert session.n_target_ingest_calls == 0
+        assert session._n_target_ingest_calls == 0
 
     assert list(train_out.columns) == list(train_target.columns)
     pd.testing.assert_frame_equal(val_out, oneshot_val)

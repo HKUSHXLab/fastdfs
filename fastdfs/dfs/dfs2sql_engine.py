@@ -19,7 +19,7 @@ from sql_formatter.core import format_sql
 
 from ..dataset.meta import RDBColumnDType, RDBCutoffTime
 from ..dataset.rdb import RDB
-from .base_engine import DFSConfig, DFSEngine, dfs_engine
+from .base_engine import DFSConfig, DFSEngine, dfs_engine, to_naive_datetime
 from .duckdb_database import DuckDBBuilder
 from .gen_sqls import decode_column_from_sql, features2sql
 from .merge_sql import merge_queries
@@ -121,7 +121,7 @@ class DFS2SQLEngine(DFSEngine):
     """SQL-based DFS engine implementation."""
 
     name = "dfs2sql"
-    supports_schema_only_entityset = True
+    plans_on_empty_frames = True
 
     def open_builder(self, config: DFSConfig) -> Tuple[DuckDBBuilder, str]:
         """Create a DuckDB builder/connection for dfs2sql (caller owns lifecycle)."""
@@ -141,7 +141,23 @@ class DFS2SQLEngine(DFSEngine):
         return builder, engine_path
 
     def ingest_rdb_tables(self, builder: DuckDBBuilder, rdb: RDB) -> None:
-        """Load all RDB tables into DuckDB (once per warm session)."""
+        """Load all RDB tables into DuckDB (once per warm session).
+
+        This is the only place that sets the column types DuckDB computes on, and it
+        sets them from RDB metadata alone:
+
+        - ``float`` -> ``float64`` (DOUBLE), also for bool, int and float32 columns.
+        - ``category`` -> pandas ``category`` (ENUM).
+        - ``datetime`` -> naive datetime (TIMESTAMP_NS); timezones are dropped and
+          the wall time kept.
+        - ``timestamp`` -> numeric.
+        - ``text`` and primary/foreign keys are loaded as they are (keys are strings,
+          so VARCHAR). Keys are only join columns, never feature values, and
+          converting high-cardinality keys to category is expensive. One visible
+          effect: DuckDB's ``mode()`` has no fixed tie-break, so a ``MODE`` feature
+          with tied counts may pick a different value than full Featuretools
+          planning did (which turned keys into ENUM).
+        """
         for table_name in rdb.table_names:
             # Shallow copy: converted columns replace columns in the copy only, so the
             # caller's RDB DataFrames are never modified (data is not duplicated).
@@ -156,17 +172,10 @@ class DFS2SQLEngine(DFSEngine):
                             df[col_schema.name], errors='coerce'
                         ).astype("float64")
                     elif col_schema.dtype == RDBColumnDType.datetime_t:
-                        df[col_schema.name] = pd.to_datetime(df[col_schema.name], errors='coerce')
+                        df[col_schema.name] = to_naive_datetime(df[col_schema.name])
                     elif col_schema.dtype == RDBColumnDType.timestamp_t:
                         df[col_schema.name] = pd.to_numeric(df[col_schema.name], errors='coerce')
                     elif col_schema.dtype == RDBColumnDType.category_t:
-                        # Same conversion woodwork applies to Categorical columns during full
-                        # planning, so DuckDB loads ENUM regardless of schema_only_entityset.
-                        # Primary/foreign keys are deliberately not converted here: they are only
-                        # join columns, never feature values, and converting high-cardinality
-                        # keys to category is expensive. They stay strings (VARCHAR) with
-                        # schema_only_entityset=True; full planning still turns them into
-                        # category (ENUM) in place, as before. Feature output is the same.
                         if not isinstance(df[col_schema.name].dtype, pd.CategoricalDtype):
                             df[col_schema.name] = df[col_schema.name].astype("category")
 
@@ -209,13 +218,15 @@ class DFS2SQLEngine(DFSEngine):
     def plan_feature_sqls(
         self,
         builder: DuckDBBuilder,
-        rdb: RDB,
-        target_dataframe: pd.DataFrame,
         features: List[ft.FeatureBase],
         cutoff_time_column: Optional[str],
         config: DFSConfig,
     ) -> Tuple[List[Any], List[str], Optional[str]]:
-        """Compile Featuretools features to (optionally merged) SQL queries."""
+        """Compile Featuretools features to (optionally merged) SQL queries.
+
+        Must run after the RDB tables and the target are ingested, because column
+        types are read from DuckDB.
+        """
         target_index = "__target_index__"
         has_cutoff_time = config.use_cutoff_time and cutoff_time_column is not None
         if has_cutoff_time:
@@ -227,7 +238,7 @@ class DFS2SQLEngine(DFSEngine):
             cutoff_time_table_name = None
             cutoff_time_col_name = None
 
-        column_type_map = self._build_column_type_map(rdb, target_dataframe)
+        column_type_map = self._build_column_type_map(builder.db)
         sqls = features2sql(
             features,
             target_index,
@@ -314,7 +325,7 @@ class DFS2SQLEngine(DFSEngine):
                 builder, target_dataframe, target_index, cutoff_time_column
             )
             sqls, column_order, cutoff_time_col_name = self.plan_feature_sqls(
-                builder, rdb, target_dataframe, features, cutoff_time_column, config
+                builder, features, cutoff_time_column, config
             )
             return self.execute_and_assemble(
                 sqls,
@@ -402,24 +413,14 @@ class DFS2SQLEngine(DFSEngine):
         # If no primary key, create default index
         return "__index__"
 
-    def _build_column_type_map(self, rdb: RDB, target_dataframe: pd.DataFrame) -> Dict[Tuple[str, str], str]:
-        """Build a mapping from (table_name, column_name) to dtype string for boolean detection.
-        
-        Returns:
-            Dictionary mapping (table_name, column_name) tuples to dtype strings
+    def _build_column_type_map(self, db: duckdb.DuckDBPyConnection) -> Dict[Tuple[str, str], str]:
+        """Map (table_name, column_name) to the DuckDB type the SQL will run on.
+
+        Read from DuckDB itself after ingest, so SQL generation (e.g. casting
+        BOOLEAN for numeric aggregations) always matches the loaded data.
         """
-        column_type_map = {}
-        
-        # Add RDB table columns
-        for table_name in rdb.table_names:
-            df = rdb.get_table(table_name)
-            for col_name in df.columns:
-                dtype_str = str(df[col_name].dtype)
-                column_type_map[(table_name, col_name)] = dtype_str
-        
-        # Add target dataframe columns
-        for col_name in target_dataframe.columns:
-            dtype_str = str(target_dataframe[col_name].dtype)
-            column_type_map[("__target__", col_name)] = dtype_str
-        
-        return column_type_map
+        rows = db.execute(
+            "SELECT table_name, column_name, data_type FROM information_schema.columns "
+            "WHERE table_catalog = current_database() AND table_schema = current_schema()"
+        ).fetchall()
+        return {(table, column): data_type for table, column, data_type in rows}

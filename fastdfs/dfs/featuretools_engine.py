@@ -32,7 +32,7 @@ class FeaturetoolsEngine(DFSEngine):
         """Compute feature values using featuretools (reuse existing computation logic)."""
         
         # Rebuild EntitySet for computation (could be optimized to reuse from prepare phase)
-        entity_set = self._build_entity_set_from_rdb(rdb, config)
+        entity_set = self._build_entity_set_from_rdb(rdb)
         target_entity_name = "__target__"
         target_index = "__target_index__"  # Target index is already handled by base class
         

@@ -55,6 +55,14 @@ def dfs_feature_renames(features: List[ft.FeatureBase]) -> Dict[str, str]:
     return renames
 
 
+def to_naive_datetime(series: pd.Series) -> pd.Series:
+    """Parse to datetime and drop any timezone, keeping the wall time (as woodwork does)."""
+    series = pd.to_datetime(series, errors='coerce')
+    if series.dt.tz is not None:
+        series = series.dt.tz_localize(None)
+    return series
+
+
 def coerce_target_key_types(
     rdb: RDB, target_dataframe: pd.DataFrame, key_mappings: Dict[str, str]
 ) -> None:
@@ -211,18 +219,14 @@ class DFSConfig(pydantic.BaseModel):
     dfs2sql_memory_limit: Optional[str] = None
     dfs2sql_temp_directory: Optional[str] = None
     include_cutoff_time: bool = False
-    # Featuretools EntitySet: register 0-row schema frames instead of full RDB tables.
-    # Values are still computed from full tables via DuckDB; this only affects planning.
-    # Requires engine="dfs2sql" (featuretools computes values from the EntitySet itself).
-    schema_only_entityset: bool = False
 
 
 class DFSEngine:
     """Base class for DFS computation engines."""
 
-    # Whether values are computed outside the Featuretools EntitySet, so planning
-    # may use schema-only (0-row) frames.
-    supports_schema_only_entityset = False
+    # Whether planning registers 0-row RDB frames (columns and types only) in the
+    # Featuretools EntitySet. Only valid for engines that compute values outside it.
+    plans_on_empty_frames = False
 
     def __init__(self, config: DFSConfig):
         self.config = config
@@ -269,12 +273,6 @@ class DFSEngine:
         config: DFSConfig
     ) -> pd.DataFrame:
         """Implementation-specific feature computation."""
-
-        if config.schema_only_entityset and not self.supports_schema_only_entityset:
-            raise ValueError(
-                f"schema_only_entityset=True requires engine='dfs2sql' (got engine '{self.name}'), "
-                "because this engine computes feature values from the planning EntitySet."
-            )
 
         # Handle empty target dataframe
         if len(target_dataframe) == 0:
@@ -331,6 +329,14 @@ class DFSEngine:
             columns_to_keep.add(cutoff_time_column)
 
         target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
+        if cutoff_time_column and not pd.api.types.is_numeric_dtype(
+            target_df_for_engine[cutoff_time_column]
+        ):
+            # Fix the cutoff type here, before planning and ingest, so every split
+            # (and every DFSSession compute) reaches DuckDB with the same type.
+            target_df_for_engine[cutoff_time_column] = to_naive_datetime(
+                target_df_for_engine[cutoff_time_column]
+            )
         return target_df_with_index, target_df_for_engine
 
     def _join_features_to_target(
@@ -401,14 +407,16 @@ class DFSEngine:
             return all_features
         
         # Single key mapping - standard DFS logic
-        entity_set = self._build_entity_set_from_rdb(rdb, config)
+        entity_set = self._build_entity_set_from_rdb(rdb)
 
         target_entity_name = "__target__"
         target_index = "__target_index__"
 
+        # Woodwork converts registered frames in place; plan on a copy so the frame
+        # engines later compute from never depends on planning.
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
-            dataframe=target_dataframe,
+            dataframe=target_dataframe.copy(),
             index=target_index,
             time_index=cutoff_time_column
         )
@@ -441,18 +449,18 @@ class DFSEngine:
 
         return filtered_features
 
-    def _build_entity_set_from_rdb(self, rdb: RDB, config: DFSConfig) -> ft.EntitySet:
+    def _build_entity_set_from_rdb(self, rdb: RDB) -> ft.EntitySet:
         """Build EntitySet from RDB tables only (adapted from existing build_dataframes logic)."""
 
         entity_set = ft.EntitySet(id=rdb.metadata.name)
-        schema_only = config.schema_only_entityset
 
         # Add all RDB tables as entities
         for table_name in rdb.table_names:
-            df_full = rdb.get_table(table_name)
-            # Schema-only planning: Woodwork/Featuretools only need columns + types.
-            # Keep a 0-row frame with identical dtypes; values still come from DuckDB.
-            df = df_full.iloc[:0].copy() if schema_only else df_full
+            df = rdb.get_table(table_name)
+            if self.plans_on_empty_frames:
+                # Featuretools only needs columns and logical types (set below from
+                # metadata) to plan; values come from the engine, not this EntitySet.
+                df = df.iloc[:0].copy()
             table_meta = rdb.get_table_metadata(table_name)
 
             # Parse columns and build logical types/semantic tags (reuse existing logic)

@@ -78,7 +78,6 @@ def main():
         engine_path=":memory:",
         max_depth=2,
         agg_primitives=["count", "mean", "max", "min"],
-        schema_only_entityset=True,
     )
 
     with fastdfs.DFSSession(
@@ -89,9 +88,6 @@ def main():
     ) as session:
         train_features = session.compute(train_df)
         val_features = session.compute(val_df)
-        print(
-            f"plan={session.n_plan_calls} target_ingest={session.n_target_ingest_calls}"
-        )
 
     assert list(train_features.columns) == list(val_features.columns)
     print(f"train shape={train_features.shape} val shape={val_features.shape}")

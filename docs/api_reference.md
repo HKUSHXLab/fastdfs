@@ -165,8 +165,6 @@ with fastdfs.DFSSession(
     val_out = session.compute(val_df)
 ```
 
-Diagnostic counters (useful in tests): `n_plan_calls`, `n_target_ingest_calls`.
-
 ---
 
 ### `DFSPipeline`
@@ -237,12 +235,11 @@ class DFSConfig(pydantic.BaseModel):
 - `agg_primitives` (List[str]): Aggregation primitives to use for feature generation
 - `max_depth` (int): Maximum depth for relationship traversal
 - `use_cutoff_time` (bool): Whether to respect temporal cutoff times
-- `engine` (str): DFS engine to use ("featuretools" or "dfs2sql")
+- `engine` (str): DFS engine to use ("featuretools" or "dfs2sql"). `dfs2sql` plans features from column types only (0-row tables) and computes all values in DuckDB, with column types set from RDB metadata; timezone-aware datetimes are made naive, keeping the wall time.
 - `engine_path` (Optional[str]): Path for engine-specific configuration (e.g., DuckDB file)
 - `max_features` (int): Maximum number of features to generate (-1 for unlimited)
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation
-- `schema_only_entityset` (bool): If `True`, Featuretools planning registers **0-row** RDB frames (schema/dtypes only) instead of full tables. Feature **values** are still computed from full data via DuckDB, so this requires `engine="dfs2sql"` (other engines raise `ValueError`). Default `False`.
 
 **Aggregation primitives:** See **[Aggregation Primitives](aggregation_primitives.md)** for defaults, FastDFS-specific primitives (`quantile_25`, `quantile_75`, `discrete_entropy`), dfs2sql vs featuretools support, SQL mappings, and categorical encoding notes.
 
