@@ -88,11 +88,13 @@ def main():
             "item_id": "item.item_id"
         },
         cutoff_time_column="timestamp",
-        config_overrides={
-            "max_depth": 2,
-            "engine": "dfs2sql",
-            "agg_primitives": ["count", "mean", "max", "min"]
-        }
+        # The engine is chosen from config before config_overrides are applied,
+        # so set it here rather than in config_overrides.
+        config=fastdfs.DFSConfig(
+            engine="dfs2sql",
+            max_depth=2,
+            agg_primitives=["count", "mean", "max", "min"],
+        ),
     )
     
     print(f"Generated {len(features_df.columns)} total columns")
