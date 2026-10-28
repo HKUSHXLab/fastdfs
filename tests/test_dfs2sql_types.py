@@ -47,7 +47,8 @@ def guard_rdb():
             "event_id": [10, 11, 12, 13, 14],
             "user_id": [1, 1, 1, 2, 3],
             "amount": [5.0, 7.0, 9.0, 11.0, 13.0],
-            "kind": ["a", "b", "b", "a", "a"],
+            # No ties in MODE(kind) for any cutoff: DuckDB's mode() has no fixed tie-break.
+            "kind": ["b", "b", "b", "a", "a"],
             "ok": [True, False, True, True, False],
             # Event 13 is on 2020-01-03 in wall time but 2020-01-02 in UTC, so a
             # 2020-01-03 cutoff tells whether the wall time was kept.
@@ -122,7 +123,7 @@ def _guard_expected():
             "d2__user.MEAN(event.amount)": [7.0, 11.0, 13.0, 6.0, NAN],
             "d2__user.MEAN(event.ok)": [2 / 3, 1.0, 0.0, 0.5, NAN],
             "d2__user.MODE(event.kind)": pd.Categorical(
-                ["b", "a", "a", "a", NAN], categories=["a", "b"], ordered=True
+                ["b", "a", "a", "b", NAN], categories=["a", "b"], ordered=True
             ),
             "d2__user.SUM(event.amount)": [21.0, 11.0, 13.0, 12.0, NAN],
             "d2__user.SUM(event.ok)": [2.0, 1.0, 0.0, 1.0, NAN],
