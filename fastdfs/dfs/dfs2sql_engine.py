@@ -20,7 +20,7 @@ from sql_formatter.core import format_sql
 
 from ..dataset.meta import RDBColumnDType, RDBCutoffTime
 from ..dataset.rdb import RDB
-from .base_engine import DFSConfig, DFSEngine, dfs_engine, to_naive_datetime
+from .base_engine import DFSConfig, DFSEngine, dfs_engine, is_valid_time_column, to_naive_datetime
 from .duckdb_database import DuckDBBuilder
 from .gen_sqls import decode_column_from_sql, features2sql
 from .merge_sql import merge_queries
@@ -117,36 +117,14 @@ def release_duckdb(db: duckdb.DuckDBPyConnection, temp_db_path: Optional[str]) -
             logger.debug(f"Could not remove temp DuckDB file {temp_db_path}: {exc}")
 
 
-def _raise_on_lost_values(
-    table_name: str, col_schema, original: pd.Series, converted: pd.Series
-) -> None:
-    """Raise if converting a column turned values that were present into missing ones.
-
-    Planning sees 0-row frames, so woodwork no longer rejects such values as it did
-    with full frames. Strings woodwork treats as missing ("nan", "None", "", ...)
-    count as missing here too, so the same inputs are accepted as before.
-    """
-    if converted.isna().sum() == original.isna().sum():
-        return
-    candidates = original[
-        converted.isna().to_numpy()
-        & original.notna().to_numpy()
-        & ~original.isin(ww.config.get_option("nan_values")).to_numpy()
-    ]
-    parse = pd.to_datetime if col_schema.dtype == RDBColumnDType.datetime_t else pd.to_numeric
-    for value in candidates.unique():
-        # A value that parses to a missing value on its own (e.g. "NaT") is missing,
-        # not lost. Anything else failed to convert: unparseable, or in a format the
-        # column-wide parse rejected (e.g. "2020-01-02" among "2020-01-01 10:00").
+def _first_non_float(series: pd.Series) -> Any:
+    """First value float() rejects (for error messages; woodwork's Double casts with float())."""
+    for value in series.dropna().unique():
         try:
-            if pd.isna(parse(value)):
-                continue
-        except (ValueError, TypeError):
-            pass
-        raise ValueError(
-            f"Column '{table_name}.{col_schema.name}' ({col_schema.dtype.value}) has values "
-            f"that cannot be converted, e.g. {value!r}"
-        )
+            float(value)
+        except (TypeError, ValueError):
+            return value
+    return None
 
 
 @dfs_engine
@@ -176,17 +154,18 @@ class DFS2SQLEngine(DFSEngine):
     def ingest_rdb_tables(self, builder: DuckDBBuilder, rdb: RDB) -> None:
         """Load all RDB tables into DuckDB (once per warm session).
 
-        This is the only place that sets the column types DuckDB computes on, and it
-        sets them from RDB metadata alone:
+        This is the only place that sets the column types DuckDB computes on. Types
+        come from RDB metadata, and values are converted with woodwork's logical
+        types, the same conversions (and checks) full-frame planning applied:
 
-        - ``float`` -> ``float64`` (DOUBLE), also for bool, int and float32 columns.
+        - ``float`` -> woodwork ``Double`` -> ``float64`` (DOUBLE), also for bool, int
+          and float32 columns. Values that cannot be converted (e.g. ``"x"``) raise a
+          ``ValueError``; strings woodwork treats as missing (``"nan"``, ...) are allowed.
         - ``category`` -> pandas ``category`` (ENUM).
-        - ``datetime`` -> naive datetime (TIMESTAMP_NS); timezones are dropped and
-          the wall time kept.
+        - ``datetime`` -> woodwork ``Datetime`` -> naive datetime (TIMESTAMP_NS).
+          Values that don't fit become NaT with a warning, except in the table's time
+          column, which must be numeric or parse as datetimes (``ValueError``).
         - ``timestamp`` -> numeric.
-        - Values that cannot be converted to their type (e.g. ``"x"`` in a ``float``
-          column) raise a ``ValueError``; missing values, including strings woodwork
-          treats as missing such as ``"nan"``, are allowed.
         - Primary keys must be unique and non-null; an ``IndexError`` is raised otherwise.
         - ``text`` and primary/foreign keys are loaded as they are (keys are strings,
           so VARCHAR). Keys are only join columns, never feature values, and
@@ -205,21 +184,28 @@ class DFS2SQLEngine(DFSEngine):
                 if col_schema.name not in df.columns:
                     continue
                 original = df[col_schema.name]
+                # dtype is an RDBColumnDType, or a plain string for some loaded metadata.
+                where = f"'{table_name}.{col_schema.name}' ({RDBColumnDType(col_schema.dtype).value})"
                 if col_schema.dtype == RDBColumnDType.float_t:
-                    # float64 like woodwork's Double, also for float32/int columns.
-                    converted = pd.to_numeric(original, errors='coerce').astype("float64")
+                    try:
+                        df[col_schema.name] = ww.logical_types.Double().transform(original)
+                    except (TypeError, ValueError, ww.exceptions.TypeConversionError) as exc:
+                        raise ValueError(
+                            f"Column {where} has values that cannot be converted to float, "
+                            f"e.g. {_first_non_float(original)!r}"
+                        ) from exc
                 elif col_schema.dtype == RDBColumnDType.datetime_t:
-                    converted = to_naive_datetime(original)
+                    if col_schema.name == table_meta.time_column and not is_valid_time_column(original):
+                        raise ValueError(
+                            f"Time column {where} must contain datetime or numeric values; "
+                            f"some values cannot be parsed as datetimes."
+                        )
+                    df[col_schema.name] = to_naive_datetime(original)
                 elif col_schema.dtype == RDBColumnDType.timestamp_t:
-                    converted = pd.to_numeric(original, errors='coerce')
+                    df[col_schema.name] = pd.to_numeric(original, errors='coerce')
                 elif col_schema.dtype == RDBColumnDType.category_t:
                     if not isinstance(original.dtype, pd.CategoricalDtype):
                         df[col_schema.name] = original.astype("category")
-                    continue
-                else:
-                    continue
-                _raise_on_lost_values(table_name, col_schema, original, converted)
-                df[col_schema.name] = converted
 
             index_col = self._get_table_index(table_meta)
             if index_col == "__index__" and "__index__" not in df.columns:
@@ -257,19 +243,14 @@ class DFS2SQLEngine(DFSEngine):
     ) -> None:
         """Load or replace ``__target__`` (+ cutoff helper) for the current split.
 
-        Key and cutoff columns get explicit types, so every split loads with the
-        same DuckDB types, even when it is empty or its keys are all missing (an
-        ``object`` column with no strings would otherwise load as INTEGER).
+        Key columns are cast to strings, so every split loads them as VARCHAR, even
+        when it is empty or its keys are all missing (an ``object`` column with no
+        strings would otherwise load as INTEGER). The cutoff column is already
+        ``datetime64[ns]`` (or numeric) from ``_prepare_target_for_engine``.
         """
         target_dataframe = target_dataframe.copy(deep=False)
         for key_col in key_columns:
             target_dataframe[key_col] = target_dataframe[key_col].astype("string")
-        if cutoff_time_column and pd.api.types.is_datetime64_any_dtype(
-            target_dataframe[cutoff_time_column]
-        ):
-            target_dataframe[cutoff_time_column] = target_dataframe[cutoff_time_column].astype(
-                "datetime64[ns]"
-            )
         builder.add_dataframe(
             dataframe_name="__target__",
             dataframe=target_dataframe,

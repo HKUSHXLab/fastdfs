@@ -14,7 +14,9 @@ import featuretools as ft
 import numpy as np
 from loguru import logger
 import pydantic
+import woodwork as ww
 from woodwork.column_schema import ColumnSchema
+from woodwork.type_sys.utils import col_is_datetime
 
 from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType, RDBColumnSchema
@@ -67,26 +69,21 @@ def _warn_unknown_config_keys(keys, known, where: str) -> None:
         warnings.warn(f"Unknown DFSConfig key '{key}' in {where} is ignored.{hint}", UserWarning)
 
 
-def to_naive_datetime(series: pd.Series, errors: str = 'coerce') -> pd.Series:
-    """Parse to datetime without a timezone, as woodwork does.
+def to_naive_datetime(series: pd.Series) -> pd.Series:
+    """Convert to naive datetimes with woodwork's ``Datetime`` logical type.
 
-    A single timezone is dropped keeping the wall time. Values with mixed UTC
-    offsets (e.g. across a DST change) have no common wall clock, so they are
-    converted to UTC first.
+    This is the conversion full-frame planning applied, so values match it: the
+    format is inferred from a sample, two-digit years use woodwork's pivot,
+    values that don't fit become NaT (with a warning), and timezones are dropped
+    keeping the wall time (mixed UTC offsets are converted to UTC first).
     """
-    try:
-        with warnings.catch_warnings():
-            # pandas 2.x warns, and returns objects, on mixed offsets.
-            warnings.filterwarnings("ignore", message=".*mixed time zones.*", category=FutureWarning)
-            parsed = pd.to_datetime(series, errors=errors)
-    except ValueError:
-        # pandas >= 3 raises on mixed offsets; an unparseable value raises again below.
-        parsed = None
-    if parsed is None or not pd.api.types.is_datetime64_any_dtype(parsed):
-        parsed = pd.to_datetime(series, errors=errors, utc=True)
-    if parsed.dt.tz is not None:
-        parsed = parsed.dt.tz_localize(None)
-    return parsed
+    return ww.logical_types.Datetime().transform(series)
+
+
+def is_valid_time_column(series: pd.Series) -> bool:
+    """Woodwork's rule for a ``Datetime`` time index: numeric, or values that all
+    parse as datetimes (missing values aside)."""
+    return pd.api.types.is_numeric_dtype(series) or col_is_datetime(series)
 
 
 def coerce_target_key_types(
@@ -365,21 +362,19 @@ class DFSEngine:
             columns_to_keep.add(cutoff_time_column)
 
         target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
-        if cutoff_time_column and not pd.api.types.is_numeric_dtype(
-            target_df_for_engine[cutoff_time_column]
-        ):
-            # Fix the cutoff type here, before planning and ingest, so every split
-            # (and every DFSSession compute) reaches DuckDB with the same type.
-            # Raise on unparseable values: a NaT cutoff would silently match no history.
-            try:
-                target_df_for_engine[cutoff_time_column] = to_naive_datetime(
-                    target_df_for_engine[cutoff_time_column], errors='raise'
-                )
-            except (ValueError, TypeError) as exc:
+        if cutoff_time_column:
+            cutoff = target_df_for_engine[cutoff_time_column]
+            # Reject values woodwork would reject for a time index: a NaT cutoff
+            # would silently match no history.
+            if not is_valid_time_column(cutoff):
                 raise ValueError(
                     f"Cutoff time column '{cutoff_time_column}' has values that cannot be "
-                    f"parsed as datetimes: {exc}"
-                ) from exc
+                    f"parsed as datetimes (or has no values)."
+                )
+            # Fix the cutoff type here, before planning and ingest, so every split
+            # (and every DFSSession compute) reaches DuckDB as datetime64[ns].
+            if not pd.api.types.is_numeric_dtype(cutoff):
+                target_df_for_engine[cutoff_time_column] = to_naive_datetime(cutoff)
         return target_df_with_index, target_df_for_engine
 
     def _join_features_to_target(
@@ -506,10 +501,13 @@ class DFSEngine:
                 # metadata) to plan; values come from the engine, not this EntitySet.
                 df = df.iloc[:0].copy()
                 # Woodwork cannot convert an empty column of strings to a time index,
-                # so give datetime columns their real type up front.
-                for col_schema in table_meta.columns:
-                    if col_schema.dtype == RDBColumnDType.datetime_t and col_schema.name in df.columns:
-                        df[col_schema.name] = to_naive_datetime(df[col_schema.name])
+                # so give a datetime time column its real type up front.
+                time_col = table_meta.time_column
+                if (
+                    time_col in df.columns
+                    and table_meta.column_dict[time_col].dtype == RDBColumnDType.datetime_t
+                ):
+                    df[time_col] = to_naive_datetime(df[time_col])
 
             # Parse columns and build logical types/semantic tags (reuse existing logic)
             logical_types = {}

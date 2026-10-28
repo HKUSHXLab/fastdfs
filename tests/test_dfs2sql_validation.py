@@ -46,12 +46,17 @@ def test_valid_primary_key_passes():
 
 
 def _event_rdb(column, values):
-    """RDB whose event.<column> holds ``values``; ``column`` is "amount" or "timestamp"."""
+    """RDB whose event.<column> holds ``values``.
+
+    ``column`` is "amount" (float), "timestamp" (the time column) or "d" (a
+    datetime column that is not the time column).
+    """
     events = {
         "event_id": ["e1", "e2", "e3"],
         "user_id": ["u1", "u1", "u2"],
         "amount": ["1.5", "2.5", "3.5"],
         "timestamp": ["2020-01-01 10:00", "2020-01-02 10:00", "2020-01-03 10:00"],
+        "d": ["2019-01-01", "2019-01-02", "2019-01-03"],
     }
     events[column] = values
     return create_rdb(
@@ -62,7 +67,7 @@ def _event_rdb(column, values):
         primary_keys={"user": "user_id", "event": "event_id"},
         foreign_keys=[("event", "user_id", "user", "user_id")],
         time_columns={"event": "timestamp"},
-        type_hints={"event": {"amount": "float"}},
+        type_hints={"event": {"amount": "float", "d": "datetime"}},
     )
 
 
@@ -73,9 +78,19 @@ PARITY_CASES = {
     "float, missing-value strings": lambda: _event_rdb("amount", ["nan", "None", ""]),
     "float, None": lambda: _event_rdb("amount", ["1.5", None, "3.5"]),
     "float, padded and inf": lambda: _event_rdb("amount", [" 1.5 ", "inf", "3.5"]),
+    "float, underscore separator": lambda: _event_rdb("amount", ["1.5", "1_000", "3.5"]),
     "time, unparseable": lambda: _event_rdb("timestamp", ["2020-01-01 10:00", "not a date", "2020-01-03 10:00"]),
     "time, mixed formats": lambda: _event_rdb("timestamp", ["2020-01-01 10:00", "2020-01-02", "2020-01-03 08:30"]),
     "time, missing values": lambda: _event_rdb("timestamp", ["2020-01-01 10:00", None, "NaT"]),
+    "time, 'None' string": lambda: _event_rdb("timestamp", ["2020-01-01 10:00", "None", "2020-01-03 10:00"]),
+    # Woodwork pivots two-digit years differently from pandas (1970, not 2070).
+    "time, two-digit years": lambda: _event_rdb("timestamp", ["01/01/70", "06/01/70", "01/03/70"]),
+    # Woodwork infers month-first from a sample; pandas would read the first value day-first.
+    "time, ambiguous day/month": lambda: _event_rdb(
+        "timestamp", ["13/01/2020 10:00", "01/02/2020 10:00", "02/03/2020 10:00"]
+    ),
+    "non-time datetime, unparseable": lambda: _event_rdb("d", ["2019-01-01", "garbage", "2019-01-03"]),
+    "non-time datetime, mixed formats": lambda: _event_rdb("d", ["2019-01-01 10:00", "2019-01-02", "2019-01-03"]),
     "time, tz-aware": lambda: _event_rdb(
         "timestamp", pd.to_datetime(["2020-01-01 10:00", "2020-01-02 10:00", "2020-01-03 10:00"]).tz_localize("UTC")
     ),
@@ -95,8 +110,14 @@ def _raises(fn):
     return False
 
 
+def _compute(case, engine):
+    target = pd.DataFrame({"user_id": ["u1", "u2"], "cut": pd.to_datetime(["2020-04-01"] * 2)})
+    config = DFSConfig(engine=engine, engine_path=":memory:", agg_primitives=["count", "max"])
+    return compute_dfs_features(PARITY_CASES[case](), target, KEYS, cutoff_time_column="cut", config=config)
+
+
 @pytest.mark.parametrize("case", sorted(PARITY_CASES))
-def test_dfs2sql_rejects_what_full_frame_planning_rejects(case):
+def test_dfs2sql_matches_full_frame_planning(case):
     # Reference: building the EntitySet from full frames, as the featuretools engine
     # (and dfs2sql on master) does. Each side gets its own RDB, because full-frame
     # planning converts the frames in place.
@@ -104,20 +125,21 @@ def test_dfs2sql_rejects_what_full_frame_planning_rejects(case):
     full_frame_fails = _raises(
         lambda: get_dfs_engine("featuretools", DFSConfig(engine="featuretools"))._build_entity_set_from_rdb(full_rdb)
     )
-    target = pd.DataFrame({"user_id": ["u1", "u2"], "cut": pd.to_datetime(["2020-04-01"] * 2)})
-    dfs2sql_fails = _raises(
-        lambda: compute_dfs_features(
-            PARITY_CASES[case](), target, KEYS, cutoff_time_column="cut", config=CONFIG
-        )
-    )
+    dfs2sql_fails = _raises(lambda: _compute(case, "dfs2sql"))
     assert dfs2sql_fails == full_frame_fails, (
         f"full-frame planning {'raises' if full_frame_fails else 'succeeds'}, "
         f"dfs2sql {'raises' if dfs2sql_fails else 'succeeds'}"
     )
+    if not dfs2sql_fails:
+        # Same values as the featuretools engine, which computes from full frames
+        # converted by woodwork (string keys avoid its separate numeric-key bug).
+        pd.testing.assert_frame_equal(
+            _compute(case, "dfs2sql"), _compute(case, "featuretools"), check_dtype=False
+        )
 
 
 def test_unconvertible_value_error_names_column():
-    with pytest.raises(ValueError, match=r"Column 'event\.amount' \(float\) has values that cannot be converted, e\.g\. 'x'"):
+    with pytest.raises(ValueError, match=r"Column 'event\.amount' \(float\) has values that cannot be converted to float, e\.g\. 'x'"):
         compute_dfs_features(
             PARITY_CASES["float, unparseable"](), TARGET.copy(), KEYS, config=CONFIG
         )

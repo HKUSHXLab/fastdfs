@@ -380,3 +380,15 @@ def test_session_split_with_missing_string_keys(dfs_config):
     assert list(missing_out.columns) == list(train_out.columns)
     assert missing_out["d1__user.age"].isna().all()
     assert list(empty_out.columns) == list(train_out.columns)
+
+
+def test_session_rejects_cutoff_kind_change(tiny_rdb, dfs_config, train_target):
+    with DFSSession(
+        tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        session.compute(train_target.copy())
+        with pytest.raises(DFSSessionError, match="numeric in this split but was datetime"):
+            session.compute(pd.DataFrame({"user_id": [1, 2], "timestamp": [1577836800, 1577923200]}))
+        # A split whose cutoffs are all missing is rejected like in one-shot.
+        with pytest.raises(ValueError, match="Cutoff time column 'timestamp' has values that cannot be parsed"):
+            session.compute(pd.DataFrame({"user_id": [1, 2], "timestamp": [None, None]}))
