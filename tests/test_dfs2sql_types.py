@@ -240,6 +240,62 @@ def test_tz_aware_rdb_times_with_naive_cutoff():
     assert out["d2__user.COUNT(event)"].tolist() == [2, 1]
 
 
+def _one_shot_and_session(rdb, splits, config):
+    """Outputs for each split from compute_dfs_features and from one DFSSession."""
+    keys = {"user_id": "user.user_id"}
+    one_shot = [
+        compute_dfs_features(rdb, split, keys, cutoff_time_column="cut", config=config)
+        for split in splits
+    ]
+    with DFSSession(rdb, keys, cutoff_time_column="cut", config=config) as session:
+        in_session = [session.compute(split) for split in splits]
+    return one_shot, in_session
+
+
+def test_string_rdb_time_column_matches_datetimes():
+    dates = ["2020-01-01", "2020-01-02", "2020-01-03"]
+    config = DFSConfig(engine="dfs2sql", engine_path=":memory:")
+    splits = [
+        pd.DataFrame({"user_id": [1, 2], "cut": pd.to_datetime(["2020-01-05", "2020-01-05"])}),
+        pd.DataFrame({"user_id": [1, 2], "cut": pd.to_datetime(["2020-01-02", "2020-01-05"])}),
+    ]
+    reference, _ = _one_shot_and_session(
+        _rdb_with_event_times(pd.to_datetime(dates)), splits, config
+    )
+    one_shot, in_session = _one_shot_and_session(_rdb_with_event_times(dates), splits, config)
+
+    for expected, a, b in zip(reference, one_shot, in_session):
+        pd.testing.assert_frame_equal(a, expected, check_dtype=True)
+        pd.testing.assert_frame_equal(b, expected, check_dtype=True)
+    assert reference[1]["d2__user.COUNT(event)"].tolist() == [1, 1]
+
+
+def test_mixed_offset_cutoffs_compared_in_utc():
+    rdb = _rdb_with_event_times(pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]))
+    # In UTC these are 2020-01-01 23:30 and 2020-01-02 22:30, so each user has
+    # one event fewer than the wall times (00:30 the next day) would give.
+    split = pd.DataFrame(
+        {"user_id": [1, 2], "cut": ["2020-01-02T00:30+01:00", "2020-01-03T00:30+02:00"]}
+    )
+    one_shot, in_session = _one_shot_and_session(
+        rdb, [split], DFSConfig(engine="dfs2sql", engine_path=":memory:")
+    )
+    assert one_shot[0]["d2__user.COUNT(event)"].tolist() == [1, 0]
+    assert in_session[0]["d2__user.COUNT(event)"].tolist() == [1, 0]
+
+
+def test_unparseable_cutoff_raises():
+    rdb = _rdb_with_event_times(pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]))
+    split = pd.DataFrame({"user_id": [1, 2], "cut": ["not a date", "2020-01-05"]})
+    config = DFSConfig(engine="dfs2sql", engine_path=":memory:")
+    match = "Cutoff time column 'cut' has values that cannot be parsed"
+    with pytest.raises(ValueError, match=match):
+        compute_dfs_features(rdb, split, {"user_id": "user.user_id"}, cutoff_time_column="cut", config=config)
+    with DFSSession(rdb, {"user_id": "user.user_id"}, cutoff_time_column="cut", config=config) as session:
+        with pytest.raises(ValueError, match=match):
+            session.compute(split)
+
+
 @pytest.mark.parametrize("engine, n_rows", [("dfs2sql", 0), ("featuretools", 3)])
 def test_planning_entityset_rows(tiny_rdb, engine, n_rows):
     # dfs2sql computes values in DuckDB, so it plans on 0-row frames; the

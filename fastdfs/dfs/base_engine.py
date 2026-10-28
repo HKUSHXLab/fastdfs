@@ -67,12 +67,26 @@ def _warn_unknown_config_keys(keys, known, where: str) -> None:
         warnings.warn(f"Unknown DFSConfig key '{key}' in {where} is ignored.{hint}", UserWarning)
 
 
-def to_naive_datetime(series: pd.Series) -> pd.Series:
-    """Parse to datetime and drop any timezone, keeping the wall time (as woodwork does)."""
-    series = pd.to_datetime(series, errors='coerce')
-    if series.dt.tz is not None:
-        series = series.dt.tz_localize(None)
-    return series
+def to_naive_datetime(series: pd.Series, errors: str = 'coerce') -> pd.Series:
+    """Parse to datetime without a timezone, as woodwork does.
+
+    A single timezone is dropped keeping the wall time. Values with mixed UTC
+    offsets (e.g. across a DST change) have no common wall clock, so they are
+    converted to UTC first.
+    """
+    try:
+        with warnings.catch_warnings():
+            # pandas 2.x warns, and returns objects, on mixed offsets.
+            warnings.filterwarnings("ignore", message=".*mixed time zones.*", category=FutureWarning)
+            parsed = pd.to_datetime(series, errors=errors)
+    except ValueError:
+        # pandas >= 3 raises on mixed offsets; an unparseable value raises again below.
+        parsed = None
+    if parsed is None or not pd.api.types.is_datetime64_any_dtype(parsed):
+        parsed = pd.to_datetime(series, errors=errors, utc=True)
+    if parsed.dt.tz is not None:
+        parsed = parsed.dt.tz_localize(None)
+    return parsed
 
 
 def coerce_target_key_types(
@@ -356,9 +370,16 @@ class DFSEngine:
         ):
             # Fix the cutoff type here, before planning and ingest, so every split
             # (and every DFSSession compute) reaches DuckDB with the same type.
-            target_df_for_engine[cutoff_time_column] = to_naive_datetime(
-                target_df_for_engine[cutoff_time_column]
-            )
+            # Raise on unparseable values: a NaT cutoff would silently match no history.
+            try:
+                target_df_for_engine[cutoff_time_column] = to_naive_datetime(
+                    target_df_for_engine[cutoff_time_column], errors='raise'
+                )
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"Cutoff time column '{cutoff_time_column}' has values that cannot be "
+                    f"parsed as datetimes: {exc}"
+                ) from exc
         return target_df_with_index, target_df_for_engine
 
     def _join_features_to_target(
@@ -479,11 +500,16 @@ class DFSEngine:
         # Add all RDB tables as entities
         for table_name in rdb.table_names:
             df = rdb.get_table(table_name)
+            table_meta = rdb.get_table_metadata(table_name)
             if self.plans_on_empty_frames:
                 # Featuretools only needs columns and logical types (set below from
                 # metadata) to plan; values come from the engine, not this EntitySet.
                 df = df.iloc[:0].copy()
-            table_meta = rdb.get_table_metadata(table_name)
+                # Woodwork cannot convert an empty column of strings to a time index,
+                # so give datetime columns their real type up front.
+                for col_schema in table_meta.columns:
+                    if col_schema.dtype == RDBColumnDType.datetime_t and col_schema.name in df.columns:
+                        df[col_schema.name] = to_naive_datetime(df[col_schema.name])
 
             # Parse columns and build logical types/semantic tags (reuse existing logic)
             logical_types = {}
