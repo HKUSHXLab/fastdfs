@@ -498,7 +498,7 @@ Override config parameters at runtime:
 
 ```python
 # Use base config
-base_config = fastdfs.DFSConfig(max_depth=2, engine="featuretools")
+base_config = fastdfs.DFSConfig(max_depth=2, engine="dfs2sql")
 
 # Override for specific computation
 features = fastdfs.compute_dfs_features(
@@ -508,11 +508,12 @@ features = fastdfs.compute_dfs_features(
     config=base_config,
     config_overrides={
         "max_depth": 3,                    # Override depth
-        "engine": "dfs2sql",               # Override engine
         "agg_primitives": ["count", "mean"] # Override primitives
     }
 )
 ```
+
+The engine is chosen from `config` before overrides are applied, so `engine` cannot be overridden; set it in the config you pass.
 
 ## Best Practices
 
@@ -619,7 +620,7 @@ for i in range(0, len(target_df), chunk_size):
         rdb=rdb,
         target_dataframe=chunk,
         key_mappings=key_mappings,
-        config_overrides={"engine": "dfs2sql"}
+        config=fastdfs.DFSConfig(engine="dfs2sql")
     )
     all_features.append(chunk_features)
 

@@ -108,9 +108,12 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,
     key_mappings={"user_id": "users.user_id", "item_id": "items.item_id"},
     cutoff_time_column="interaction_time",
-    config_overrides={"max_depth": 2, "engine": "dfs2sql"}
+    config=fastdfs.DFSConfig(engine="dfs2sql"),
+    config_overrides={"max_depth": 2}
 )
 ```
+
+The engine is chosen from `config` before `config_overrides` are applied, so set `engine` in `config`; overriding it has no effect.
 
 **Key Mappings Format:**
 ```python

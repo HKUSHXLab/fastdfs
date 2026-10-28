@@ -134,7 +134,8 @@ def compute_dfs_features(
         ...     target_dataframe=target_df,
         ...     key_mappings={"user_id": "user.user_id", "item_id": "item.item_id"},
         ...     cutoff_time_column="interaction_time",
-        ...     config_overrides={"max_depth": 2, "engine": "dfs2sql"}
+        ...     config=DFSConfig(engine="dfs2sql"),
+        ...     config_overrides={"max_depth": 2}
         ... )
     """
     # Use default config if not provided
