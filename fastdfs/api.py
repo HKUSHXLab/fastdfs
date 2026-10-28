@@ -8,13 +8,12 @@ the RDB interface.
 from typing import Dict, Optional, Any, List, Tuple
 import pandas as pd
 from pathlib import Path
-from loguru import logger
 
 from .dfs import DFSConfig, get_dfs_engine
 from .dfs.base_engine import coerce_target_key_types
 from .dfs.session import DFSSession, DFSSessionError
 from .dataset.rdb import RDB
-from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat, RDBColumnDType
+from .dataset.meta import RDBMeta, RDBTableSchema, RDBTableDataFormat
 from .transform.infer_schema import InferSchemaTransform
 
 __all__ = [
