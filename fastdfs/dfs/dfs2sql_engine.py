@@ -118,8 +118,9 @@ def release_duckdb(db: duckdb.DuckDBPyConnection, temp_db_path: Optional[str]) -
 
 
 def _first_non_float(series: pd.Series) -> Any:
-    """First value float() rejects (for error messages; woodwork's Double casts with float())."""
-    for value in series.dropna().unique():
+    """First value float() rejects, for error messages (woodwork's Double casts with
+    float()). Iterates instead of using unique(), which fails on unhashable values."""
+    for value in series.dropna():
         try:
             float(value)
         except (TypeError, ValueError):
@@ -171,9 +172,11 @@ class DFS2SQLEngine(DFSEngine):
           Values that don't fit become NaT with a warning, except in the table's time
           column, which must be numeric or parse as datetimes (``ValueError``).
         - ``timestamp`` -> numeric.
+        - ``text`` -> woodwork ``NaturalLanguage`` -> pandas ``string`` (VARCHAR), whatever
+          mix of Python types the column holds.
         - Primary keys must be unique and non-null; an ``IndexError`` is raised otherwise.
-        - ``text`` and primary/foreign keys are loaded as they are (keys are strings,
-          so VARCHAR). Keys are only join columns, never feature values, and
+        - Primary/foreign keys are loaded as they are (``canonicalize_key_types`` makes
+          them strings, so VARCHAR). Keys are only join columns, never feature values, and
           converting high-cardinality keys to category is expensive. One visible
           effect: DuckDB's ``mode()`` has no fixed tie-break, so a ``MODE`` feature
           with tied counts may pick a different value than full Featuretools
@@ -195,9 +198,10 @@ class DFS2SQLEngine(DFSEngine):
                     try:
                         df[col_schema.name] = ww.logical_types.Double().transform(original)
                     except (TypeError, ValueError, ww.exceptions.TypeConversionError) as exc:
+                        bad = _first_non_float(original)
+                        example = "" if bad is None else f", e.g. {bad!r}"
                         raise ValueError(
-                            f"Column {where} has values that cannot be converted to float, "
-                            f"e.g. {_first_non_float(original)!r}"
+                            f"Column {where} has values that cannot be converted to float{example}"
                         ) from exc
                 elif col_schema.dtype == RDBColumnDType.datetime_t:
                     if col_schema.name == table_meta.time_column and not is_valid_time_column(original):
@@ -211,6 +215,10 @@ class DFS2SQLEngine(DFSEngine):
                 elif col_schema.dtype == RDBColumnDType.category_t:
                     if not isinstance(original.dtype, pd.CategoricalDtype):
                         df[col_schema.name] = original.astype("category")
+                elif col_schema.dtype == RDBColumnDType.text_t:
+                    # No feature reads text, but DuckDB guesses an object column's type
+                    # from its first rows and fails on later values that don't fit.
+                    df[col_schema.name] = ww.logical_types.NaturalLanguage().transform(original)
 
             index_col = self._get_table_index(table_meta)
             if index_col == "__index__" and "__index__" not in df.columns:

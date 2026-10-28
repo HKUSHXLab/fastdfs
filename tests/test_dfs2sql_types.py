@@ -37,6 +37,7 @@ def guard_rdb():
             "active": [True, False, True],  # bool -> float
             "country": ["us", "cn", "us"],
             "bio": ["likes a", "likes b", "likes c"],
+            "note": [1, "two", {"three": 3}],  # text with mixed Python types
             "signup": pd.to_datetime(
                 ["2019-12-01 23:30", "2019-12-02 01:00", "2019-12-03 12:00"]
             ).tz_localize("Asia/Shanghai"),
@@ -79,7 +80,7 @@ def guard_rdb():
         ],
         time_columns={"event": "timestamp"},
         type_hints={
-            "user": {"country": "category", "bio": "text"},
+            "user": {"country": "category", "bio": "text", "note": "text"},
             "event": {"kind": "category"},
         },
     )

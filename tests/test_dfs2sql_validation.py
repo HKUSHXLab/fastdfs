@@ -143,3 +143,34 @@ def test_unconvertible_value_error_names_column():
         compute_dfs_features(
             PARITY_CASES["float, unparseable"](), TARGET.copy(), KEYS, config=CONFIG
         )
+
+
+@pytest.mark.parametrize(
+    "last_value",
+    ["A1B 2C3", {"b": "x"}],
+    ids=["number-like strings then text", "dicts with different keys"],
+)
+def test_text_column_with_mixed_types(last_value):
+    # DuckDB guesses an object column's type from its first rows; a different value
+    # after that sample used to fail the whole load, though no feature reads text.
+    n = 3000
+    first = [10000 + i for i in range(n - 1)] if isinstance(last_value, str) else [{"a": i} for i in range(n - 1)]
+    users = pd.DataFrame(
+        {"uid": [f"u{i}" for i in range(n)], "x": first + [last_value], "age": [float(i) for i in range(n)]}
+    )
+    rdb = create_rdb(tables={"users": users}, primary_keys={"users": "uid"}, type_hints={"users": {"x": "text"}})
+    target = pd.DataFrame({"uid": ["u1", "u2"]})
+    out = compute_dfs_features(rdb, target, {"uid": "users.uid"}, config=CONFIG)
+    assert out["d1__users.age"].tolist() == [1.0, 2.0]
+    with DFSSession(rdb, {"uid": "users.uid"}, config=CONFIG) as session:
+        assert session.compute(target)["d1__users.age"].tolist() == [1.0, 2.0]
+
+
+def test_unhashable_values_in_float_column_give_readable_error():
+    rdb = create_rdb(
+        tables={"user": pd.DataFrame({"user_id": ["u1", "u2", "u3"], "f": [[1.0], [2.0], [3.0]]})},
+        primary_keys={"user": "user_id"},
+        type_hints={"user": {"f": "float"}},
+    )
+    with pytest.raises(ValueError, match=r"Column 'user\.f' \(float\) has values that cannot be converted to float, e\.g\. \[1\.0\]"):
+        compute_dfs_features(rdb, TARGET.copy(), KEYS, config=CONFIG)
