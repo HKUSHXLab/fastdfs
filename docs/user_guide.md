@@ -308,9 +308,11 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,        # Dataframe to augment
     key_mappings=key_mappings,         # Column mappings
     cutoff_time_column="timestamp",    # Optional: temporal cutoff
-    config_overrides={                 # Optional: DFS parameters
+    config=fastdfs.DFSConfig(          # Optional: engine and other settings
+        engine="dfs2sql",              # (the engine must be set here, not in config_overrides)
+    ),
+    config_overrides={                 # Optional: per-call DFS parameters
         "max_depth": 2,
-        "engine": "featuretools",
         "agg_primitives": ["count", "mean", "max", "min"]
     }
 )
@@ -337,6 +339,23 @@ new_data = pd.DataFrame({
 })
 new_features = fastdfs.compute_dfs_features(rdb, new_data, key_mappings)
 ```
+
+### Reusing Work Across Splits with `DFSSession`
+
+When several target dataframes share the same RDB, key mappings and cutoff column, a session plans the features and loads the RDB into DuckDB once, then reuses both for every split:
+
+```python
+config = fastdfs.DFSConfig(engine="dfs2sql")
+
+with fastdfs.DFSSession(
+    rdb, key_mappings, cutoff_time_column="timestamp", config=config
+) as session:
+    train_features = session.compute(train_df)  # plans features and loads the RDB
+    val_features = session.compute(val_df)      # reuses both; only the target changes
+    test_features = session.compute(test_df)
+```
+
+`DFSSession` requires `engine="dfs2sql"`. The feature columns are fixed by the first `compute`, so every split gets the same columns in the same order. For a single feature matrix, `compute_dfs_features` is still the simplest option.
 
 ## Transform Pipeline
 
@@ -481,7 +500,7 @@ Override config parameters at runtime:
 
 ```python
 # Use base config
-base_config = fastdfs.DFSConfig(max_depth=2, engine="featuretools")
+base_config = fastdfs.DFSConfig(max_depth=2, engine="dfs2sql")
 
 # Override for specific computation
 features = fastdfs.compute_dfs_features(
@@ -491,11 +510,12 @@ features = fastdfs.compute_dfs_features(
     config=base_config,
     config_overrides={
         "max_depth": 3,                    # Override depth
-        "engine": "dfs2sql",               # Override engine
         "agg_primitives": ["count", "mean"] # Override primitives
     }
 )
 ```
+
+The engine is chosen from `config` before overrides are applied, so `engine` cannot be overridden; set it in the config you pass.
 
 ## Best Practices
 
@@ -602,7 +622,7 @@ for i in range(0, len(target_df), chunk_size):
         rdb=rdb,
         target_dataframe=chunk,
         key_mappings=key_mappings,
-        config_overrides={"engine": "dfs2sql"}
+        config=fastdfs.DFSConfig(engine="dfs2sql")
     )
     all_features.append(chunk_features)
 

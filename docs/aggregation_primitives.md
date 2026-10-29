@@ -55,7 +55,7 @@ The **dfs2sql** engine (`engine="dfs2sql"`) is the default. It generates one SQL
 | `std` | numeric | `stddev_samp(col)` (matches pandas / Featuretools sample std) |
 | `median` | numeric | `median(col)`; booleans cast to integer |
 | `mode` | categorical (string) | `mode(col)` |
-| `num_unique` | any | `num_unique(col)` — Featuretools name; **not** `nunique` |
+| `num_unique` | any | `COUNT(DISTINCT col)` — Featuretools name; **not** `nunique`. `0` (int64) when there are no child rows |
 | `quantile_25` | numeric | `quantile_cont(col, 0.25)` |
 | `quantile_75` | numeric | `quantile_cont(col, 0.75)` |
 | `discrete_entropy` | categorical | `entropy(col)` |

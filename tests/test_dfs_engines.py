@@ -8,6 +8,8 @@ for external target dataframes using the simplified RDB dataset interface.
 from loguru import logger
 logger.enable("fastdfs")
 
+import tempfile
+
 import pytest
 import pandas as pd
 import numpy as np
@@ -16,7 +18,7 @@ from pathlib import Path
 from fastdfs.dfs import DFSConfig, get_dfs_engine, FeaturetoolsEngine, DFS2SQLEngine
 from fastdfs.dfs.base_engine import Quantile25, Quantile75, DiscreteEntropy
 from fastdfs.dataset.rdb import RDB
-from fastdfs.api import load_rdb, compute_dfs_features, DFSPipeline
+from fastdfs.api import load_rdb, compute_dfs_features, create_rdb, DFSPipeline
 
 
 @pytest.fixture
@@ -465,6 +467,69 @@ class TestDFS2SQLEngine:
 
         # Check that result has same number of rows
         assert len(result_df) == len(target_dataframe)
+
+    def test_num_unique_primitive(self):
+        """num_unique should compile to COUNT(DISTINCT ...) and ignore NULLs like pandas nunique.
+
+        A target row without child rows gets 0, like count, so the column is int64 whether
+        or not such rows exist and the dtype does not depend on the split.
+        """
+        users = pd.DataFrame({"user_id": [1, 2, 3, 4]})
+        events = pd.DataFrame({
+            "event_id": [10, 11, 12, 13, 14, 15, 16],
+            "user_id": [1, 1, 1, 2, 2, 3, 3],
+            "kind": ["a", "b", "a", "c", None, "d", "d"],
+        })
+        rdb = create_rdb(
+            tables={"user": users, "event": events},
+            primary_keys={"user": "user_id", "event": "event_id"},
+            foreign_keys=[("event", "user_id", "user", "user_id")],
+        )
+        config = DFSConfig(
+            engine="dfs2sql",
+            engine_path=":memory:",
+            max_depth=2,
+            agg_primitives=["num_unique"],
+        )
+
+        column = "d2__user.NUM_UNIQUE(event.kind)"
+        expected = events.groupby("user_id")["kind"].nunique()
+
+        with_events = compute_dfs_features(
+            rdb,
+            pd.DataFrame({"user_id": [1, 2, 3]}),
+            key_mappings={"user_id": "user.user_id"},
+            config=config,
+        )
+        assert with_events[column].dtype == "int64"
+        assert with_events[column].tolist() == expected.loc[[1, 2, 3]].tolist()
+
+        # User 4 has no events.
+        without_events = compute_dfs_features(
+            rdb,
+            pd.DataFrame({"user_id": [1, 4]}),
+            key_mappings={"user_id": "user.user_id"},
+            config=config,
+        )
+        assert without_events[column].dtype == "int64"
+        assert without_events[column].tolist() == [expected.loc[1], 0]
+
+    def test_temp_db_file_removed_after_compute(self, tmp_path, monkeypatch):
+        """Without engine_path, the generated temp DuckDB file is deleted after one-shot compute."""
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+        users = pd.DataFrame({"user_id": [1, 2], "age": [25.0, 30.0]})
+        rdb = create_rdb(tables={"user": users}, primary_keys={"user": "user_id"})
+        config = DFSConfig(engine="dfs2sql", max_depth=1)
+        assert config.engine_path is None
+
+        compute_dfs_features(
+            rdb,
+            pd.DataFrame({"user_id": [1, 2]}),
+            key_mappings={"user_id": "user.user_id"},
+            config=config,
+        )
+
+        assert list(tmp_path.glob("fastdfs_*.db*")) == []
 
 
 class TestEngineComparison:

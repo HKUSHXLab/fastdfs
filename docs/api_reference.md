@@ -108,9 +108,12 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,
     key_mappings={"user_id": "users.user_id", "item_id": "items.item_id"},
     cutoff_time_column="interaction_time",
-    config_overrides={"max_depth": 2, "engine": "dfs2sql"}
+    config=fastdfs.DFSConfig(engine="dfs2sql"),
+    config_overrides={"max_depth": 2}
 )
 ```
+
+The engine is chosen from `config` before `config_overrides` are applied, so set `engine` in `config`; overriding it has no effect.
 
 **Key Mappings Format:**
 ```python
@@ -119,6 +122,50 @@ key_mappings = {
     "user_id": "users.user_id",           # target_df.user_id -> users.user_id
     "product_id": "products.product_id"   # target_df.product_id -> products.product_id
 }
+```
+
+---
+
+### `DFSSession`
+
+A warm DFS session bound to one RDB and key/cutoff configuration. Use this when you compute features for **multiple target frames** (train/val/test) against the same prepared RDB.
+
+```python
+class DFSSession:
+    def __init__(
+        self,
+        rdb: RDB,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str] = None,
+        config: Optional[DFSConfig] = None,
+    ): ...
+
+    feature_columns_: Optional[List[str]]
+    n_features_: int
+
+    def compute(self, target_dataframe: pd.DataFrame) -> pd.DataFrame: ...
+    def close(self) -> None: ...
+```
+
+**Parameters:** same binding fields as `compute_dfs_features` (`rdb`, `key_mappings`, `cutoff_time_column`, `config`).
+
+Call `compute(target_df)` per split; call `close()` (or use the session as a context manager) when finished.
+
+**Notes:**
+- Requires `engine="dfs2sql"` (raises `DFSSessionError` otherwise).
+- The first `compute` freezes the Featuretools feature list, SQL, and DuckDB RDB tables.
+- Later `compute` calls only replace the target/cutoff tables, then re-run SQL + assembly.
+- Feature column order is stable across splits after the first successful compute; later empty splits return those columns with zero rows.
+- The first `compute` needs at least one row to plan features; an empty first split raises `DFSSessionError`.
+
+**Example:**
+```python
+config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
+with fastdfs.DFSSession(
+    rdb, {"user_id": "users.user_id"}, cutoff_time_column="timestamp", config=config
+) as session:
+    train_out = session.compute(train_df)
+    val_out = session.compute(val_df)
 ```
 
 ---
@@ -191,11 +238,13 @@ class DFSConfig(pydantic.BaseModel):
 - `agg_primitives` (List[str]): Aggregation primitives to use for feature generation
 - `max_depth` (int): Maximum depth for relationship traversal
 - `use_cutoff_time` (bool): Whether to respect temporal cutoff times
-- `engine` (str): DFS engine to use ("featuretools" or "dfs2sql")
-- `engine_path` (Optional[str]): Path for engine-specific configuration (e.g., DuckDB file)
+- `engine` (str): DFS engine to use ("featuretools" or "dfs2sql"). `dfs2sql` plans features from column types only (0-row tables) and computes all values in DuckDB, with column types set from RDB metadata and values converted with woodwork's logical types (as full-frame planning did). Timezone-aware datetimes are made naive, keeping the wall time; values with mixed UTC offsets are converted to UTC first.
+- `engine_path` (Optional[str]): Path for engine-specific configuration (e.g., DuckDB file). With `engine="dfs2sql"`, an existing file at this path is **replaced** when the engine opens it, and the file is kept afterwards. Don't point it at a database you want to keep, or share it between sessions or calls that are open at the same time. With `None`, a temporary file is used and deleted afterwards.
 - `max_features` (int): Maximum number of features to generate (-1 for unlimited)
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation
+
+Unknown keys, passed to `DFSConfig(...)` or in `config_overrides`, are ignored with a `UserWarning` that names the key and suggests the closest field (e.g. `max_dpeth` → `max_depth`). To make them errors: `warnings.filterwarnings("error", message="Unknown DFSConfig key")`.
 
 **Aggregation primitives:** See **[Aggregation Primitives](aggregation_primitives.md)** for defaults, FastDFS-specific primitives (`quantile_25`, `quantile_75`, `discrete_entropy`), dfs2sql vs featuretools support, SQL mappings, and categorical encoding notes.
 

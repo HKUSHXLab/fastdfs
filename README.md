@@ -37,13 +37,13 @@ features = fastdfs.compute_dfs_features(
     target_dataframe=target_df,
     key_mappings=key_mappings,
     cutoff_time_column="interaction_time",
-    config_overrides={
-        "engine": "dfs2sql",
-        "engine_path": ":memory:",
-        "dfs2sql_sql_workers": 2,
-        "dfs2sql_threads": 8,
-        "dfs2sql_memory_limit": "4GB",
-    },
+    config=fastdfs.DFSConfig(
+        engine="dfs2sql",
+        engine_path=":memory:",
+        dfs2sql_sql_workers=2,
+        dfs2sql_threads=8,
+        dfs2sql_memory_limit="4GB",
+    ),
 )
 ```
 
@@ -67,6 +67,25 @@ Parallel floating-point aggregation and tied MODE values can differ between runs
 | stackexchange (churn) | **1.1×** | **1.1×** |
 
 Full tables and setup notes: [dfs2sql parallel SQL benchmarks](docs/dfs2sql_parallel_sql_benchmarks.md).
+
+## Multi-split sessions (train / val / test)
+
+When the RDB is fixed and only the target rows change, reuse planning and DuckDB ingest with `DFSSession` (`engine="dfs2sql"`):
+
+```python
+config = fastdfs.DFSConfig(engine="dfs2sql", engine_path=":memory:")
+with fastdfs.DFSSession(
+    rdb,
+    key_mappings={"user_id": "user.user_id", "item_id": "item.item_id"},
+    cutoff_time_column="interaction_time",
+    config=config,
+) as session:
+    train_features = session.compute(train_df)
+    val_features = session.compute(val_df)
+    test_features = session.compute(test_df)
+```
+
+For a single target matrix, keep using `compute_dfs_features`. See `examples/session_train_val_example.py`.
 
 ## Engine Comparison
 

@@ -6,13 +6,17 @@ target dataframes and simplified RDB datasets, removing the dependency on tasks.
 """
 
 import abc
+import difflib
+import warnings
 from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
 import featuretools as ft
 import numpy as np
 from loguru import logger
 import pydantic
+import woodwork as ww
 from woodwork.column_schema import ColumnSchema
+from woodwork.type_sys.utils import col_is_datetime
 
 from ..dataset.rdb import RDB
 from ..dataset.meta import RDBColumnDType, RDBColumnSchema
@@ -42,6 +46,98 @@ def dfs_feature_column_name(feature: ft.FeatureBase) -> str:
     - ``d2__patients.MEAN(admissions.MEAN(icustays.los_icu))`` — nested aggregation at depth 2
     """
     return f"d{int(feature.get_depth())}__{feature.get_name()}"
+
+
+def dfs_feature_renames(features: List[ft.FeatureBase]) -> Dict[str, str]:
+    """Map Featuretools feature names to ``dfs_feature_column_name`` where they differ."""
+    renames = {}
+    for f in features:
+        old = f.get_name()
+        new = dfs_feature_column_name(f)
+        if old != new:
+            renames[old] = new
+    return renames
+
+
+def _warn_unknown_config_keys(keys, known, where: str) -> None:
+    """Warn once per key that is not a DFSConfig field (such keys are ignored)."""
+    for key in keys:
+        if key in known:
+            continue
+        close = difflib.get_close_matches(str(key), list(known), n=1)
+        hint = f" Did you mean '{close[0]}'?" if close else ""
+        warnings.warn(f"Unknown DFSConfig key '{key}' in {where} is ignored.{hint}", UserWarning)
+
+
+class InvalidTimeColumnError(TypeError, ValueError):
+    """A time column or cutoff column whose values are not datetimes or numbers.
+
+    Subclasses TypeError, which woodwork raised for these inputs before dfs2sql
+    planned on 0-row frames, and ValueError, since the values are what is wrong.
+    """
+
+
+def to_naive_datetime(series: pd.Series) -> pd.Series:
+    """Convert to naive datetimes with woodwork's ``Datetime`` logical type.
+
+    This is the conversion full-frame planning applied, so values match it: the
+    format is inferred from a sample, two-digit years use woodwork's pivot,
+    values that don't fit become NaT (with a warning), and timezones are dropped
+    keeping the wall time (mixed UTC offsets are converted to UTC first).
+    """
+    return ww.logical_types.Datetime().transform(series)
+
+
+def is_valid_time_column(series: pd.Series) -> bool:
+    """Woodwork's rule for a ``Datetime`` time index: numeric, or values that all
+    parse as datetimes (missing values aside)."""
+    return pd.api.types.is_numeric_dtype(series) or col_is_datetime(series)
+
+
+def coerce_target_key_types(
+    rdb: RDB, target_dataframe: pd.DataFrame, key_mappings: Dict[str, str]
+) -> None:
+    """Validate key mappings and convert target key columns to string, in place."""
+    for target_col, rdb_key in key_mappings.items():
+        if target_col not in target_dataframe.columns:
+            raise ValueError(f"Key column '{target_col}' not found in target dataframe.")
+
+        table_name, col_name = rdb_key.split('.')
+        try:
+            table_meta = rdb.get_table_metadata(table_name)
+        except ValueError:
+            raise ValueError(f"Table '{table_name}' not found in RDB.")
+
+        if col_name not in table_meta.column_dict:
+            raise ValueError(f"Column '{col_name}' not found in table '{table_name}'.")
+
+        col_meta = table_meta.column_dict[col_name]
+
+        if col_meta.dtype != RDBColumnDType.primary_key:
+            raise ValueError(f"RDB column '{rdb_key}' is not a primary key. Key mappings must point to primary keys.")
+
+        if col_meta.dtype in (RDBColumnDType.primary_key, RDBColumnDType.foreign_key):
+            # Convert target column to string to match RDB key columns (which should always be string)
+            target_col_dtype = target_dataframe[target_col].dtype
+
+            # Convert to string if not already string (categorical is converted for consistency)
+            if not pd.api.types.is_string_dtype(target_col_dtype):
+                try:
+                    target_dataframe[target_col] = target_dataframe[target_col].astype(str)
+
+                    # Log the conversion for transparency
+                    logger.debug(
+                        f"Converted target column '{target_col}' from {target_col_dtype} to string "
+                        f"to match RDB key '{rdb_key}'"
+                    )
+                except (ValueError, TypeError) as e:
+                    # If conversion fails, raise a helpful error
+                    raise TypeError(
+                        f"Failed to convert column '{target_col}' from {target_col_dtype} to string "
+                        f"to match RDB key '{rdb_key}'. Original error: {e}. "
+                        f"Please ensure the values are compatible or manually convert: "
+                        f"target_df['{target_col}'] = target_df['{target_col}'].astype(str)"
+                    )
 
 
 # Custom quantile aggregation primitives
@@ -155,9 +251,21 @@ class DFSConfig(pydantic.BaseModel):
     dfs2sql_temp_directory: Optional[str] = None
     include_cutoff_time: bool = False
 
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_keys(cls, data: Any) -> Any:
+        # Unknown keys are ignored (pydantic's default); warn so typos are noticed.
+        if isinstance(data, dict):
+            _warn_unknown_config_keys(data, cls.model_fields, "DFSConfig")
+        return data
+
 
 class DFSEngine:
     """Base class for DFS computation engines."""
+
+    # Whether planning registers 0-row RDB frames (columns and types only) in the
+    # Featuretools EntitySet. Only valid for engines that compute values outside it.
+    plans_on_empty_frames = False
 
     def __init__(self, config: DFSConfig):
         self.config = config
@@ -185,10 +293,12 @@ class DFSEngine:
             DataFrame with original target_dataframe data plus generated features
         """
         # Merge config overrides
-        effective_config = self.config.copy(deep=True)
+        effective_config = self.config.model_copy(deep=True)
         if config_overrides:
+            _warn_unknown_config_keys(config_overrides, DFSConfig.model_fields, "config_overrides")
             for key, value in config_overrides.items():
-                if hasattr(effective_config, key):
+                # Only declared fields: hasattr() would also accept methods like copy.
+                if key in DFSConfig.model_fields:
                     setattr(effective_config, key, value)
 
         return self._compute_features_impl(
@@ -209,25 +319,9 @@ class DFSEngine:
         if len(target_dataframe) == 0:
             return target_dataframe
 
-        original_index = target_dataframe.index
-
-        target_index = "__target_index__"
-        if target_index in target_dataframe.columns:
-            logger.error(f"Target dataframe cannot contain reserved column name '{target_index}'.")
-        # Assign creates a new dataframe but reuses underlying blocks where possible.
-        target_df_with_index = target_dataframe.assign(
-            **{target_index: np.arange(len(target_dataframe))}
+        target_df_with_index, target_df_for_engine = self._prepare_target_for_engine(
+            target_dataframe, key_mappings, cutoff_time_column
         )
-
-        # Optimization: Filter target dataframe to only include necessary columns
-        # This defines the contract for the engines: they only see keys, time, and index.
-        columns_to_keep = {target_index}
-        columns_to_keep.update(key_mappings.keys())
-        if cutoff_time_column:
-            columns_to_keep.add(cutoff_time_column)
-            
-        # Work on a defensive copy that engines are free to mutate.
-        target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
 
         # Phase 1: Feature preparation (common logic in base class)
         features = self.prepare_features(rdb, target_df_for_engine, key_mappings, cutoff_time_column, config)
@@ -241,27 +335,79 @@ class DFSEngine:
             rdb, target_df_for_engine, key_mappings, cutoff_time_column, features, config
         )
 
-        renames = {}
-        for f in features:
-            old = f.get_name()
-            new = dfs_feature_column_name(f)
-            if old != new and old in feature_matrix.columns:
-                renames[old] = new
+        renames = dfs_feature_renames(features)
         if renames:
             feature_matrix = feature_matrix.rename(columns=renames, copy=False)
 
-        if target_index not in feature_matrix.columns:
-            logger.error("Feature matrix is missing the target index column '__target_index__'.")
+        return self._join_features_to_target(
+            target_df_with_index, feature_matrix, target_dataframe.index
+        )
 
-        # Align features with original target rows using the target index
+    def _prepare_target_for_engine(
+        self,
+        target_dataframe: pd.DataFrame,
+        key_mappings: Dict[str, str],
+        cutoff_time_column: Optional[str],
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Add ``__target_index__`` and keep only the columns engines may see.
+
+        Returns ``(target_df_with_index, target_df_for_engine)``: the full target
+        with the index column, and a defensive copy holding only the index, key
+        and cutoff columns, which engines are free to mutate.
+        """
+        target_index = "__target_index__"
+        if target_index in target_dataframe.columns:
+            raise ValueError(f"Target dataframe cannot contain reserved column name '{target_index}'.")
+        # Assign creates a new dataframe but reuses underlying blocks where possible.
+        target_df_with_index = target_dataframe.assign(
+            **{target_index: np.arange(len(target_dataframe))}
+        )
+
+        # This defines the contract for the engines: they only see keys, time, and index.
+        columns_to_keep = {target_index}
+        columns_to_keep.update(key_mappings.keys())
+        if cutoff_time_column:
+            columns_to_keep.add(cutoff_time_column)
+
+        target_df_for_engine = target_df_with_index[list(columns_to_keep)].copy()
+        if cutoff_time_column:
+            cutoff = target_df_for_engine[cutoff_time_column]
+            # Reject values woodwork would reject for a time index: a NaT cutoff
+            # would silently match no history. Check all-missing explicitly too,
+            # because col_is_datetime accepts an all-NaT datetime64 column by dtype
+            # (one-shot planning still rejects it, but a session only plans once).
+            # Bool counts as numeric for pandas, but woodwork rejects it as a cutoff.
+            # An empty split has nothing to check.
+            if len(cutoff) and (
+                pd.api.types.is_bool_dtype(cutoff)
+                or cutoff.isna().all()
+                or not is_valid_time_column(cutoff)
+            ):
+                raise InvalidTimeColumnError(
+                    f"Cutoff time column '{cutoff_time_column}' has values that cannot be "
+                    f"parsed as datetimes (or has no values)."
+                )
+            # Fix the cutoff type here, before planning and ingest, so every split
+            # (and every DFSSession compute) reaches DuckDB as datetime64[ns].
+            if not pd.api.types.is_numeric_dtype(cutoff):
+                target_df_for_engine[cutoff_time_column] = to_naive_datetime(cutoff)
+        return target_df_with_index, target_df_for_engine
+
+    def _join_features_to_target(
+        self,
+        target_df_with_index: pd.DataFrame,
+        feature_matrix: pd.DataFrame,
+        original_index: pd.Index,
+    ) -> pd.DataFrame:
+        """Join features onto the target rows by ``__target_index__`` and restore the original index."""
+        target_index = "__target_index__"
+        if target_index not in feature_matrix.columns:
+            raise ValueError(f"Feature matrix is missing the target index column '{target_index}'.")
+
         target_with_idx = target_df_with_index.set_index(target_index)
         features_with_idx = feature_matrix.set_index(target_index)
-
         merged = target_with_idx.join(features_with_idx, how="left")
-
-        # Restore the original index ordering
         merged.index = original_index
-
         return merged
 
     def prepare_features(
@@ -320,9 +466,11 @@ class DFSEngine:
         target_entity_name = "__target__"
         target_index = "__target_index__"
 
+        # Woodwork converts registered frames in place; plan on a copy so the frame
+        # engines later compute from never depends on planning.
         entity_set = entity_set.add_dataframe(
             dataframe_name=target_entity_name,
-            dataframe=target_dataframe,
+            dataframe=target_dataframe.copy(),
             index=target_index,
             time_index=cutoff_time_column
         )
@@ -364,6 +512,18 @@ class DFSEngine:
         for table_name in rdb.table_names:
             df = rdb.get_table(table_name)
             table_meta = rdb.get_table_metadata(table_name)
+            if self.plans_on_empty_frames:
+                # Featuretools only needs columns and logical types (set below from
+                # metadata) to plan; values come from the engine, not this EntitySet.
+                df = df.iloc[:0].copy()
+                # Woodwork cannot convert an empty column of strings to a time index,
+                # so give a datetime time column its real type up front.
+                time_col = table_meta.time_column
+                if (
+                    time_col in df.columns
+                    and table_meta.column_dict[time_col].dtype == RDBColumnDType.datetime_t
+                ):
+                    df[time_col] = to_naive_datetime(df[time_col])
 
             # Parse columns and build logical types/semantic tags (reuse existing logic)
             logical_types = {}
