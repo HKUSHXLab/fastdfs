@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from fastdfs.api import compute_dfs_features, create_rdb
-from fastdfs.dfs import DFSConfig, DFSSession, get_dfs_engine
+from fastdfs.dfs import DFSConfig, DFSSession, InvalidTimeColumnError, get_dfs_engine
 
 CONFIG = DFSConfig(engine="dfs2sql", engine_path=":memory:", agg_primitives=["count"])
 KEYS = {"user_id": "user.user_id"}
@@ -174,3 +174,18 @@ def test_unhashable_values_in_float_column_give_readable_error():
     )
     with pytest.raises(ValueError, match=r"Column 'user\.f' \(float\) has values that cannot be converted to float, e\.g\. \[1\.0\]"):
         compute_dfs_features(rdb, TARGET.copy(), KEYS, config=CONFIG)
+
+
+@pytest.mark.parametrize("where", ["RDB time column", "cutoff"])
+def test_invalid_time_values_raise_type_and_value_error(where):
+    # Woodwork raised TypeError for these on master; the error is also a ValueError.
+    if where == "RDB time column":
+        rdb = PARITY_CASES["time, unparseable"]()
+        cut = pd.to_datetime(["2020-04-01", "2020-04-01"])
+    else:
+        rdb = PARITY_CASES["valid"]()
+        cut = ["2020-04-01", "not a date"]
+    target = pd.DataFrame({"user_id": ["u1", "u2"], "cut": cut})
+    with pytest.raises(InvalidTimeColumnError) as info:
+        compute_dfs_features(rdb, target, KEYS, cutoff_time_column="cut", config=CONFIG)
+    assert isinstance(info.value, TypeError) and isinstance(info.value, ValueError)

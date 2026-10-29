@@ -94,7 +94,10 @@ class DFSSession:
         """Release the DuckDB connection.
 
         Deletes the DB file only if the session generated a temporary path
-        (``config.engine_path`` is ``None``); a user-supplied path is kept.
+        (``config.engine_path`` is ``None``); a user-supplied path is not deleted
+        on close. Note that the first ``compute()`` replaces any existing file at a
+        user-supplied ``engine_path``, so don't point it at a database you want to
+        keep, or share it with another session or call that is still open.
         The same cleanup also runs if the session is garbage-collected or the
         interpreter exits without ``close()``.
         """

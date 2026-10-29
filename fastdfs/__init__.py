@@ -21,7 +21,7 @@ from .api import (
 )
 
 # Core components
-from .dfs import DFSConfig
+from .dfs import DFSConfig, InvalidTimeColumnError
 from .dataset.rdb import RDB, RDBDataset
 from .transform import (
     RDBTransform,
@@ -40,6 +40,7 @@ __all__ = [
     "DFSPipeline",
     "DFSSession",
     "DFSSessionError",
+    "InvalidTimeColumnError",
     
     # Core components
     "DFSConfig",

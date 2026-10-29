@@ -69,6 +69,14 @@ def _warn_unknown_config_keys(keys, known, where: str) -> None:
         warnings.warn(f"Unknown DFSConfig key '{key}' in {where} is ignored.{hint}", UserWarning)
 
 
+class InvalidTimeColumnError(TypeError, ValueError):
+    """A time column or cutoff column whose values are not datetimes or numbers.
+
+    Subclasses TypeError, which woodwork raised for these inputs before dfs2sql
+    planned on 0-row frames, and ValueError, since the values are what is wrong.
+    """
+
+
 def to_naive_datetime(series: pd.Series) -> pd.Series:
     """Convert to naive datetimes with woodwork's ``Datetime`` logical type.
 
@@ -368,9 +376,14 @@ class DFSEngine:
             # would silently match no history. Check all-missing explicitly too,
             # because col_is_datetime accepts an all-NaT datetime64 column by dtype
             # (one-shot planning still rejects it, but a session only plans once).
+            # Bool counts as numeric for pandas, but woodwork rejects it as a cutoff.
             # An empty split has nothing to check.
-            if len(cutoff) and (cutoff.isna().all() or not is_valid_time_column(cutoff)):
-                raise ValueError(
+            if len(cutoff) and (
+                pd.api.types.is_bool_dtype(cutoff)
+                or cutoff.isna().all()
+                or not is_valid_time_column(cutoff)
+            ):
+                raise InvalidTimeColumnError(
                     f"Cutoff time column '{cutoff_time_column}' has values that cannot be "
                     f"parsed as datetimes (or has no values)."
                 )

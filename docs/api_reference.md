@@ -239,7 +239,7 @@ class DFSConfig(pydantic.BaseModel):
 - `max_depth` (int): Maximum depth for relationship traversal
 - `use_cutoff_time` (bool): Whether to respect temporal cutoff times
 - `engine` (str): DFS engine to use ("featuretools" or "dfs2sql"). `dfs2sql` plans features from column types only (0-row tables) and computes all values in DuckDB, with column types set from RDB metadata and values converted with woodwork's logical types (as full-frame planning did). Timezone-aware datetimes are made naive, keeping the wall time; values with mixed UTC offsets are converted to UTC first.
-- `engine_path` (Optional[str]): Path for engine-specific configuration (e.g., DuckDB file)
+- `engine_path` (Optional[str]): Path for engine-specific configuration (e.g., DuckDB file). With `engine="dfs2sql"`, an existing file at this path is **replaced** when the engine opens it, and the file is kept afterwards. Don't point it at a database you want to keep, or share it between sessions or calls that are open at the same time. With `None`, a temporary file is used and deleted afterwards.
 - `max_features` (int): Maximum number of features to generate (-1 for unlimited)
 - `chunk_size` (Optional[int]): Chunk size for batch processing
 - `n_jobs` (int): Number of parallel jobs for computation

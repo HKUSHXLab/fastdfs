@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from fastdfs.api import compute_dfs_features
-from fastdfs.dfs import DFSConfig
+from fastdfs.dfs import DFSConfig, InvalidTimeColumnError
 from fastdfs.dfs.dfs2sql_engine import DFS2SQLEngine
 from fastdfs.dfs.session import DFSSession, DFSSessionError
 
@@ -476,3 +476,19 @@ def test_session_split_missing_cutoff_column_raises_even_if_empty(tiny_rdb, dfs_
         with pytest.raises(KeyError) as empty:
             session.compute(missing.iloc[:0])
     assert type(empty.value) is type(non_empty.value)
+
+
+def test_bool_cutoff_rejected_in_one_shot_and_later_split(tiny_rdb, dfs_config, train_target):
+    # pandas counts bool as numeric; the session must not report a kind mismatch.
+    bool_cut = pd.DataFrame({"user_id": [1, 2], "timestamp": [True, False]})
+    with pytest.raises(InvalidTimeColumnError):
+        compute_dfs_features(
+            tiny_rdb, bool_cut.copy(), {"user_id": "user.user_id"},
+            cutoff_time_column="timestamp", config=dfs_config,
+        )
+    with DFSSession(
+        tiny_rdb, {"user_id": "user.user_id"}, cutoff_time_column="timestamp", config=dfs_config
+    ) as session:
+        session.compute(train_target.copy())
+        with pytest.raises(InvalidTimeColumnError):
+            session.compute(bool_cut.copy())

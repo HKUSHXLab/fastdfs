@@ -20,7 +20,14 @@ from sql_formatter.core import format_sql
 
 from ..dataset.meta import RDBColumnDType, RDBCutoffTime
 from ..dataset.rdb import RDB
-from .base_engine import DFSConfig, DFSEngine, dfs_engine, is_valid_time_column, to_naive_datetime
+from .base_engine import (
+    DFSConfig,
+    DFSEngine,
+    InvalidTimeColumnError,
+    dfs_engine,
+    is_valid_time_column,
+    to_naive_datetime,
+)
 from .duckdb_database import DuckDBBuilder
 from .gen_sqls import decode_column_from_sql, features2sql
 from .merge_sql import merge_queries
@@ -103,8 +110,10 @@ def assemble_dfs2sql_feature_frames(
 def release_duckdb(db: duckdb.DuckDBPyConnection, temp_db_path: Optional[str]) -> None:
     """Close a dfs2sql DuckDB connection and delete its generated temp DB file, if any.
 
-    ``temp_db_path`` must be set only for a path fastdfs generated itself; a
-    user-supplied ``engine_path`` is never deleted. Errors are logged, not raised.
+    ``temp_db_path`` must be set only for a path fastdfs generated itself; this
+    function never deletes a user-supplied ``engine_path`` (note that opening a
+    builder on ``engine_path`` replaces any existing file there; see
+    ``DuckDBBuilder``). Errors are logged, not raised.
     """
     try:
         db.close()
@@ -198,7 +207,8 @@ class DFS2SQLEngine(DFSEngine):
         - ``category`` -> pandas ``category`` (ENUM).
         - ``datetime`` -> woodwork ``Datetime`` -> naive datetime (TIMESTAMP_NS).
           Values that don't fit become NaT with a warning, except in the table's time
-          column, which must be numeric or parse as datetimes (``ValueError``).
+          column, which must be numeric or parse as datetimes (``InvalidTimeColumnError``,
+          a ``TypeError`` and ``ValueError``).
         - ``timestamp`` -> numeric.
         - ``text`` -> woodwork ``NaturalLanguage`` -> pandas ``string`` (VARCHAR), whatever
           mix of Python types the column holds.
@@ -238,7 +248,7 @@ class DFS2SQLEngine(DFSEngine):
                         ) from exc
                 elif col_schema.dtype == RDBColumnDType.datetime_t:
                     if col_schema.name == table_meta.time_column and not is_valid_time_column(original):
-                        raise ValueError(
+                        raise InvalidTimeColumnError(
                             f"Time column {where} must contain datetime or numeric values; "
                             f"some values cannot be parsed as datetimes."
                         )
