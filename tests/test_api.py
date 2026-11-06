@@ -164,3 +164,37 @@ class TestPhase4API:
         # Both should have same number of rows
         assert len(ft_features) == len(sample_target_df)
         assert len(sql_features) == len(sample_target_df)
+
+
+def test_dfs_config_warns_on_unknown_keyword():
+    with pytest.warns(UserWarning, match=r"Unknown DFSConfig key 'max_dpeth' in DFSConfig is ignored\. Did you mean 'max_depth'\?"):
+        config = DFSConfig(engine="dfs2sql", max_dpeth=3)
+    assert config.max_depth == DFSConfig().max_depth
+    assert not hasattr(config, "max_dpeth")
+
+    with pytest.warns(UserWarning, match="Unknown DFSConfig key 'not_a_field'"):
+        DFSConfig.model_validate({"not_a_field": 1})
+
+
+def test_dfs_config_known_keywords_do_not_warn():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        DFSConfig(engine="dfs2sql", max_depth=3, engine_path=":memory:")
+
+
+def test_config_overrides_warn_on_unknown_keys(tiny_rdb):
+    target = pd.DataFrame({"user_id": [1, 2]})
+    with pytest.warns(UserWarning, match="Unknown DFSConfig key 'copy' in config_overrides") as record:
+        out = compute_dfs_features(
+            tiny_rdb,
+            target,
+            key_mappings={"user_id": "user.user_id"},
+            config=DFSConfig(engine="dfs2sql", engine_path=":memory:", agg_primitives=["count"]),
+            # "copy" is a method on pydantic models, not a field; it must not be set.
+            config_overrides={"max_depth": 1, "copy": 1},
+        )
+    assert len([w for w in record if "Unknown DFSConfig key" in str(w.message)]) == 1
+    # max_depth=1 was applied: only the user's own columns, no aggregations.
+    assert not any("COUNT" in c for c in out.columns)

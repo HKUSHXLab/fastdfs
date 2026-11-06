@@ -25,8 +25,11 @@ class DuckDBBuilder:
         time_index : Optional[str] = None,
         logical_types : Optional[Dict[str, str]] = None,
         semantic_tags : Optional[Dict[str, str]] = None,
+        *,
+        replace: bool = False,
     ):
-        self.db.sql(f"CREATE TABLE \"{dataframe_name}\" AS SELECT * from dataframe")
+        verb = "CREATE OR REPLACE TABLE" if replace else "CREATE TABLE"
+        self.db.sql(f"{verb} \"{dataframe_name}\" AS SELECT * from dataframe")
         if time_index is not None:
             self.time_columns[dataframe_name] = time_index
 
@@ -41,15 +44,18 @@ class DuckDBBuilder:
 
     def set_cutoff_time(
         self,
-        cutoff_time : Optional[pd.DataFrame]
+        cutoff_time : Optional[pd.DataFrame],
+        *,
+        replace: bool = False,
     ):
         if cutoff_time is None:
             return
         assert RDBCutoffTime.column_name in cutoff_time.columns
         self.cutoff_time_col_name = RDBCutoffTime.column_name.value
         self.cutoff_time_table_name = RDBCutoffTime.table_name.value
-        
-        self.db.sql(f"CREATE TABLE {self.cutoff_time_table_name} AS SELECT * from cutoff_time")
+
+        verb = "CREATE OR REPLACE TABLE" if replace else "CREATE TABLE"
+        self.db.sql(f"{verb} {self.cutoff_time_table_name} AS SELECT * from cutoff_time")
         self.cutoff_time = cutoff_time
 
 

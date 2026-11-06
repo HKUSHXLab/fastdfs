@@ -78,8 +78,8 @@ def main():
     print("Applying transforms...")
     transformed_rdb = transform_pipeline(rdb)
     
-    # 5. Generate features using Featuretools engine
-    print("Generating features with Featuretools...")
+    # 5. One-shot feature generation (single target matrix)
+    print("Generating features with dfs2sql (one-shot)...")
     features_df = fastdfs.compute_dfs_features(
         rdb=transformed_rdb,
         target_dataframe=target_df,
@@ -88,11 +88,13 @@ def main():
             "item_id": "item.item_id"
         },
         cutoff_time_column="timestamp",
-        config_overrides={
-            "max_depth": 2,
-            "engine": "dfs2sql",
-            "agg_primitives": ["count", "mean", "max", "min"]
-        }
+        # The engine is chosen from config before config_overrides are applied,
+        # so set it here rather than in config_overrides.
+        config=fastdfs.DFSConfig(
+            engine="dfs2sql",
+            max_depth=2,
+            agg_primitives=["count", "mean", "max", "min"],
+        ),
     )
     
     print(f"Generated {len(features_df.columns)} total columns")
@@ -103,6 +105,9 @@ def main():
     for col in features_df.columns:
         if col not in target_df.columns:
             print(f"  - {col}")
+
+    # 6. For train/val/test on the same RDB, prefer DFSSession (see session_train_val_example.py)
+    print("\nTip: use fastdfs.DFSSession(...) when computing multiple splits.")
     
     print("\n=== Example completed successfully! ===")
 
